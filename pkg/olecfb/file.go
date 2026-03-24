@@ -19,6 +19,7 @@ type File struct {
 	wb       storage.WriteBackend
 	opt      OpenOptions
 	closed   bool
+	activeTx *Tx
 	root     Node
 	hdr      *cfbHeader
 	fat      []uint32
@@ -197,9 +198,16 @@ func (f *File) Begin(opt TxOptions) (*Tx, error) {
 	if f.closed {
 		return nil, newError(ErrInvalidArgument, "file is closed", "tx.begin", "", -1, nil)
 	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return &Tx{
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.activeTx != nil {
+		if f.activeTx.closed {
+			f.activeTx = nil
+		} else {
+			return nil, newError(ErrConflict, "another transaction is active", "tx.begin", "", -1, nil)
+		}
+	}
+	tx := &Tx{
 		file:       f,
 		opt:        opt,
 		nodes:      cloneNodes(f.nodes),
@@ -208,7 +216,9 @@ func (f *File) Begin(opt TxOptions) (*Tx, error) {
 		entries:    cloneEntries(f.entries),
 		streamData: cloneStreamData(f.streamData),
 		nextID:     maxNodeID(f.nodes) + 1,
-	}, nil
+	}
+	f.activeTx = tx
+	return tx, nil
 }
 
 func (f *File) Walk(fn func(Node) error) error {
@@ -688,6 +698,7 @@ func (tx *Tx) Commit(ctx context.Context, opt CommitOptions) (*CommitResult, err
 	if tx == nil || tx.closed {
 		return nil, newError(ErrTxClosed, "transaction is closed", "tx.commit", "", -1, nil)
 	}
+	defer tx.release()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -732,7 +743,19 @@ func (tx *Tx) Revert() error {
 		return newError(ErrTxClosed, "transaction is closed", "tx.revert", "", -1, nil)
 	}
 	tx.closed = true
+	tx.release()
 	return nil
+}
+
+func (tx *Tx) release() {
+	if tx == nil || tx.file == nil {
+		return
+	}
+	tx.file.mu.Lock()
+	defer tx.file.mu.Unlock()
+	if tx.file.activeTx == tx {
+		tx.file.activeTx = nil
+	}
 }
 
 func backendKind(rb storage.ReadBackend) string {

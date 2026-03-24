@@ -228,6 +228,28 @@ func TestTxRenameKeepsExistingStreamData(t *testing.T) {
 	}
 }
 
+func TestTxSingleActiveTransaction(t *testing.T) {
+	f, err := CreateInMemory(CreateOptions{})
+	if err != nil {
+		t.Fatalf("CreateInMemory returned error: %v", err)
+	}
+	tx1, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if _, err := f.Begin(TxOptions{}); err == nil {
+		t.Fatal("expected conflict while tx1 is active")
+	} else if !IsCode(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+	if err := tx1.Revert(); err != nil {
+		t.Fatalf("Revert returned error: %v", err)
+	}
+	if _, err := f.Begin(TxOptions{}); err != nil {
+		t.Fatalf("Begin should succeed after revert: %v", err)
+	}
+}
+
 func TestTxCommitLargeStreamWithIncrementalFallback(t *testing.T) {
 	f, err := CreateInMemory(CreateOptions{})
 	if err != nil {
