@@ -1,0 +1,97 @@
+﻿version: "1"
+spec: "MS-CFB"
+owner: "olecore"
+
+items:
+  - id: CFB-HEADER-001
+    section: "MS-CFB header"
+    level: MUST
+    requirement: "Validate signature and header size before any allocation"
+    implementation: "internal/cfbheader"
+    tests:
+      - "unit/header_signature_valid"
+      - "unit/header_signature_invalid"
+      - "fuzz/header"
+
+  - id: CFB-FAT-001
+    section: "MS-CFB FAT chain"
+    level: MUST
+    requirement: "Detect FAT cycle and stop traversal safely"
+    implementation: "internal/cfbfat"
+    tests:
+      - "unit/fat_cycle_detect"
+      - "fuzz/fat_chain"
+
+  - id: CFB-MINI-001
+    section: "MS-CFB MiniFAT"
+    level: MUST
+    requirement: "Route mini stream reads through MiniFAT for small streams"
+    implementation: "internal/cfbminifat"
+    tests:
+      - "unit/minifat_small_stream_read"
+      - "regression/minifat_real_world"
+
+  - id: CFB-DIR-001
+    section: "MS-CFB directory entry"
+    level: MUST
+    requirement: "Validate directory entry bounds and name length"
+    implementation: "internal/cfbdir"
+    tests:
+      - "unit/dir_entry_bounds"
+      - "unit/dir_entry_name_limit"
+
+  - id: CFB-TXN-001
+    section: "Transaction semantics"
+    level: SHOULD
+    requirement: "Commit/Revert should preserve atomicity on failure"
+    implementation: "internal/cfbtxn"
+    tests:
+      - "integration/tx_commit_atomic"
+      - "integration/tx_revert"
+
+  - id: CFB-PATH-001
+    section: "Path canonicalization"
+    level: MUST
+    requirement: "Canonical path parser rejects empty segments and invalid escapes"
+    implementation: "pkg/olecfb path helpers"
+    tests:
+      - "unit/path_parse_valid"
+      - "unit/path_parse_invalid"
+
+  - id: CFB-DETERMINISM-001
+    section: "Deterministic output"
+    level: MUST
+    requirement: "Walk and report output order must be stable for same input"
+    implementation: "pkg/olecfb + pkg/olextract"
+    tests:
+      - "integration/walk_deterministic"
+      - "integration/report_deterministic"
+
+  - id: OLEPS-001
+    section: "MS-OLEPS"
+    level: SHOULD
+    requirement: "Read common property sets and preserve unknown properties"
+    implementation: "pkg/oleps"
+    tests:
+      - "unit/oleps_read_common"
+      - "regression/oleps_preserve_unknown"
+
+  - id: OLEDS-001
+    section: "MS-OLEDS"
+    level: SHOULD
+    requirement: "Detect Ole10Native/CompObj/Package payloads"
+    implementation: "pkg/oleds"
+    tests:
+      - "unit/oleds_detect_ole10native"
+      - "unit/oleds_detect_compobj"
+      - "unit/oleds_detect_package"
+
+  - id: EXTRACT-001
+    section: "Recursive extraction"
+    level: MUST
+    requirement: "Apply depth/size/object quotas and dedup by SHA-256"
+    implementation: "pkg/olextract"
+    tests:
+      - "integration/extract_depth_limit"
+      - "integration/extract_size_limit"
+      - "integration/extract_dedup"
