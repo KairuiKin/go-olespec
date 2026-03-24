@@ -13,22 +13,9 @@ func loadFAT(readAt func([]byte, int64) (int, error), size int64, hdr *cfbHeader
 		return nil, nil
 	}
 
-	fatSectorIDs := make([]uint32, 0, hdr.NumFATSectors)
-	for _, id := range hdr.DIFAT {
-		if id == cfbFreeSector {
-			continue
-		}
-		fatSectorIDs = append(fatSectorIDs, id)
-		if uint32(len(fatSectorIDs)) == hdr.NumFATSectors {
-			break
-		}
-	}
-
-	if uint32(len(fatSectorIDs)) < hdr.NumFATSectors {
-		if hdr.FirstDIFAT != cfbEndOfChain || hdr.NumDIFATSectors > 0 {
-			return nil, newError(ErrUnsupported, "extended DIFAT chain is not implemented yet", "parse.fat", "", -1, nil)
-		}
-		return nil, newError(ErrBadHeader, "not enough FAT sector ids in DIFAT header", "parse.fat", "", -1, nil)
+	fatSectorIDs, err := collectFATSectorIDs(readAt, size, hdr)
+	if err != nil {
+		return nil, err
 	}
 
 	sectorSize := int64(1 << hdr.SectorShift)
@@ -50,6 +37,62 @@ func loadFAT(readAt func([]byte, int64) (int, error), size int64, hdr *cfbHeader
 		}
 	}
 	return fat, nil
+}
+
+func collectFATSectorIDs(readAt func([]byte, int64) (int, error), size int64, hdr *cfbHeader) ([]uint32, error) {
+	fatSectorIDs := make([]uint32, 0, hdr.NumFATSectors)
+	for _, id := range hdr.DIFAT {
+		if id == cfbFreeSector {
+			continue
+		}
+		fatSectorIDs = append(fatSectorIDs, id)
+		if uint32(len(fatSectorIDs)) == hdr.NumFATSectors {
+			return fatSectorIDs, nil
+		}
+	}
+
+	if hdr.NumDIFATSectors == 0 || hdr.FirstDIFAT == cfbEndOfChain {
+		return nil, newError(ErrBadHeader, "not enough FAT sector ids in DIFAT header", "parse.fat", "", -1, nil)
+	}
+	sectorSize := int64(1 << hdr.SectorShift)
+	entriesPerDifatSector := int(sectorSize/4) - 1
+	current := hdr.FirstDIFAT
+	seenDifat := map[uint32]struct{}{}
+
+	for i := uint32(0); i < hdr.NumDIFATSectors; i++ {
+		if current == cfbEndOfChain {
+			return nil, newError(ErrBadHeader, "difat chain ended early", "parse.fat", "", -1, nil)
+		}
+		if _, ok := seenDifat[current]; ok {
+			return nil, newError(ErrCycleDetected, "cycle detected in difat chain", "parse.fat", "", -1, nil)
+		}
+		seenDifat[current] = struct{}{}
+
+		off := sectorOffset(current, sectorSize)
+		if off < 0 || off+sectorSize > size {
+			return nil, newError(ErrOutOfBounds, "difat sector out of bounds", "parse.fat", "", off, nil)
+		}
+		buf := make([]byte, sectorSize)
+		if err := readFullAt(readAt, buf, off); err != nil {
+			return nil, newError(ErrBadFATChain, "failed to read difat sector", "parse.fat", "", off, err)
+		}
+		for j := 0; j < entriesPerDifatSector; j++ {
+			id := binary.LittleEndian.Uint32(buf[j*4 : j*4+4])
+			if id == cfbFreeSector {
+				continue
+			}
+			fatSectorIDs = append(fatSectorIDs, id)
+			if uint32(len(fatSectorIDs)) == hdr.NumFATSectors {
+				return fatSectorIDs, nil
+			}
+		}
+		current = binary.LittleEndian.Uint32(buf[entriesPerDifatSector*4 : entriesPerDifatSector*4+4])
+	}
+
+	if uint32(len(fatSectorIDs)) < hdr.NumFATSectors {
+		return nil, newError(ErrBadHeader, "difat chain does not provide enough fat sectors", "parse.fat", "", -1, nil)
+	}
+	return fatSectorIDs, nil
 }
 
 func sectorOffset(sectorID uint32, sectorSize int64) int64 {

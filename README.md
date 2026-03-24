@@ -7,7 +7,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - `pkg/olecfb`: core contracts for CFB/OLE container operations
 - `pkg/oledoc`: UI-agnostic document view model contracts
 - `pkg/oleps`: OLE property set stream parser (minimal)
-- `pkg/oleds`: placeholder for OLE object data support
+- `pkg/oleds`: OLE object stream detector (Ole10Native/CompObj/Package)
 - `pkg/olextract`: placeholder for recursive extraction support
 
 ## Implemented so far (`pkg/olecfb`)
@@ -22,6 +22,11 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
   - MiniFAT streams
 - Strict/lenient parsing modes with warning report
 - Basic extraction report with stream hashing (SHA-256)
+- OLE object detection in extraction (`DetectOLEDS`)
 - Property set parsing:
   - parse property set stream header and sets
   - read SummaryInformation common fields (string/int/time basic types)
+- Transaction (v1):
+  - `CreateStorage` / `PutStream` / `Delete` / `Rename` / `Commit` / `Revert`
+  - `Commit` uses `FullRewrite` serializer and writes back to mem/file backend
+  - `CommitOptions{Strategy: Incremental}` currently falls back to `FullRewrite`

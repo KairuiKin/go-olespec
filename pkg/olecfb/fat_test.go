@@ -1,6 +1,9 @@
 package olecfb
 
-import "testing"
+import (
+	"encoding/binary"
+	"testing"
+)
 
 func TestWalkFATChain_OK(t *testing.T) {
 	fat := []uint32{
@@ -59,5 +62,40 @@ func TestWalkFATChain_LimitExceeded(t *testing.T) {
 	}
 	if !IsCode(err, ErrLimitExceeded) {
 		t.Fatalf("expected ErrLimitExceeded, got %v", err)
+	}
+}
+
+func TestOpenBytes_LoadFATExtendedDIFAT(t *testing.T) {
+	const fatCount = 110
+	header := buildValidHeader(cfbMajorVersion3)
+	binary.LittleEndian.PutUint32(header[44:48], fatCount)
+	binary.LittleEndian.PutUint32(header[68:72], 0) // first DIFAT sector
+	binary.LittleEndian.PutUint32(header[72:76], 1) // one DIFAT sector
+	for i := 0; i < cfbNumDifatEntries; i++ {
+		v := uint32(cfbFreeSector)
+		if i < cfbNumDifatEntries {
+			v = uint32(i + 1) // FAT sectors 1..109
+		}
+		binary.LittleEndian.PutUint32(header[76+i*4:80+i*4], v)
+	}
+
+	totalSectors := 111 // 1 DIFAT + 110 FAT
+	buf := make([]byte, cfbHeaderSize+totalSectors*cfbHeaderSize)
+	copy(buf, header)
+
+	// DIFAT sector(0): one extra FAT sector id (110), then free entries, then EOC.
+	difatOff := cfbHeaderSize
+	binary.LittleEndian.PutUint32(buf[difatOff:difatOff+4], 110)
+	for i := 1; i < cfbHeaderSize/4-1; i++ {
+		binary.LittleEndian.PutUint32(buf[difatOff+i*4:difatOff+i*4+4], cfbFreeSector)
+	}
+	binary.LittleEndian.PutUint32(buf[difatOff+(cfbHeaderSize/4-1)*4:difatOff+(cfbHeaderSize/4-1)*4+4], cfbEndOfChain)
+
+	f, err := OpenBytes(buf, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	if got := len(f.fat); got != fatCount*(cfbHeaderSize/4) {
+		t.Fatalf("unexpected fat length: got %d want %d", got, fatCount*(cfbHeaderSize/4))
 	}
 }

@@ -256,6 +256,29 @@ func TestExtract_FromV4Stream(t *testing.T) {
 	}
 }
 
+func TestExtract_DetectOLEDS(t *testing.T) {
+	payload := buildOle10NativeBytes("a.txt", "C:\\a.txt", []byte("abc"))
+	fileBytes, _ := buildValidV4FileWithNamedStream("\x01Ole10Native", payload)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{Deduplicate: true, DetectOLEDS: true})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	if len(rep.Artifacts) != 1 {
+		t.Fatalf("unexpected artifact count: %d", len(rep.Artifacts))
+	}
+	a := rep.Artifacts[0]
+	if a.Kind != ArtifactOleObj {
+		t.Fatalf("expected ole object kind, got %s", a.Kind)
+	}
+	if a.Note != "oleds:ole10native" {
+		t.Fatalf("unexpected oleds note: %q", a.Note)
+	}
+}
+
 func TestOpenStream_MiniStream(t *testing.T) {
 	buf, payload := buildValidFileWithMiniStream()
 	f, err := OpenBytes(buf, OpenOptions{Mode: Strict})
@@ -545,6 +568,26 @@ func buildSummaryPropertySetStreamBytes(title string, pageCount int32) []byte {
 	copy(section[offPages:], valPages)
 
 	return append(header, section...)
+}
+
+func buildOle10NativeBytes(fileName, sourcePath string, payload []byte) []byte {
+	var body []byte
+	body = append(body, 0x02, 0x00)
+	body = append(body, []byte(fileName)...)
+	body = append(body, 0)
+	body = append(body, []byte(sourcePath)...)
+	body = append(body, 0)
+	body = append(body, []byte(sourcePath)...)
+	body = append(body, 0)
+	sz := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sz, uint32(len(payload)))
+	body = append(body, sz...)
+	body = append(body, payload...)
+
+	out := make([]byte, 4)
+	binary.LittleEndian.PutUint32(out, uint32(len(body)))
+	out = append(out, body...)
+	return out
 }
 
 func buildValidFileWithBranchingTree() []byte {

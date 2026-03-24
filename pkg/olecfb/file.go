@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
+	"sort"
 	"strings"
 	"sync"
 
@@ -22,18 +24,27 @@ type File struct {
 	fat      []uint32
 	miniFAT  []uint32
 	miniData []byte
-	nodes    map[NodeID]Node
-	order    []NodeID
-	children map[NodeID][]NodeID
-	entries  map[NodeID]dirEntry
-	report   Report
-	mu       sync.RWMutex
+
+	nodes      map[NodeID]Node
+	order      []NodeID
+	children   map[NodeID][]NodeID
+	entries    map[NodeID]dirEntry
+	streamData map[NodeID][]byte
+	report     Report
+
+	mu sync.RWMutex
 }
 
 type Tx struct {
-	file   *File
-	opt    TxOptions
-	closed bool
+	file       *File
+	opt        TxOptions
+	closed     bool
+	nodes      map[NodeID]Node
+	order      []NodeID
+	children   map[NodeID][]NodeID
+	entries    map[NodeID]dirEntry
+	streamData map[NodeID][]byte
+	nextID     NodeID
 }
 
 func Open(r storage.ReadBackend, opt OpenOptions) (*File, error) {
@@ -117,18 +128,19 @@ func Open(r storage.ReadBackend, opt OpenOptions) (*File, error) {
 	}
 
 	f := &File{
-		rb:       r,
-		opt:      opt,
-		root:     root,
-		hdr:      hdr,
-		fat:      fat,
-		miniFAT:  miniFAT,
-		miniData: miniData,
-		nodes:    nodes,
-		order:    order,
-		children: buildChildrenIndex(order, nodes),
-		entries:  entryMap,
-		report:   report,
+		rb:         r,
+		opt:        opt,
+		root:       root,
+		hdr:        hdr,
+		fat:        fat,
+		miniFAT:    miniFAT,
+		miniData:   miniData,
+		nodes:      nodes,
+		order:      order,
+		children:   buildChildrenIndex(order, nodes),
+		entries:    entryMap,
+		streamData: map[NodeID][]byte{},
+		report:     report,
 	}
 	return f, nil
 }
@@ -185,7 +197,18 @@ func (f *File) Begin(opt TxOptions) (*Tx, error) {
 	if f.closed {
 		return nil, newError(ErrInvalidArgument, "file is closed", "tx.begin", "", -1, nil)
 	}
-	return &Tx{file: f, opt: opt}, nil
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return &Tx{
+		file:       f,
+		opt:        opt,
+		nodes:      cloneNodes(f.nodes),
+		order:      append([]NodeID(nil), f.order...),
+		children:   cloneChildren(f.children),
+		entries:    cloneEntries(f.entries),
+		streamData: cloneStreamData(f.streamData),
+		nextID:     maxNodeID(f.nodes) + 1,
+	}, nil
 }
 
 func (f *File) Walk(fn func(Node) error) error {
@@ -241,36 +264,27 @@ func (f *File) WalkEx(opt WalkOptions, fn func(WalkEvent) error) (WalkResult, er
 	return WalkResult{Visited: visited, MaxDepth: maxDepth}, nil
 }
 
-func (f *File) OpenStream(path string) (StreamReader, error) {
+func (f *File) OpenStream(streamPath string) (StreamReader, error) {
 	if f == nil {
-		return nil, newError(ErrInvalidArgument, "file is nil", "open_stream", path, -1, nil)
+		return nil, newError(ErrInvalidArgument, "file is nil", "open_stream", streamPath, -1, nil)
 	}
-	if path == "" {
-		return nil, newError(ErrInvalidArgument, "path is empty", "open_stream", path, -1, nil)
+	if streamPath == "" {
+		return nil, newError(ErrInvalidArgument, "path is empty", "open_stream", streamPath, -1, nil)
 	}
-	canonical, err := CanonicalPath(path)
+	canonical, err := CanonicalPath(streamPath)
 	if err != nil {
 		return nil, err
 	}
 
-	var target Node
-	found := false
-	for _, id := range f.order {
-		n, ok := f.nodes[id]
-		if !ok {
-			continue
-		}
-		if strings.EqualFold(n.Path, string(canonical)) {
-			target = n
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, newError(ErrNotFound, "stream not found", "open_stream", string(canonical), -1, nil)
+	target, err := f.GetNodeByPath(string(canonical))
+	if err != nil {
+		return nil, err
 	}
 	if target.Type != NodeStream {
 		return nil, newError(ErrInvalidArgument, "path is not a stream", "open_stream", string(canonical), -1, nil)
+	}
+	if data, ok := f.streamData[target.ID]; ok {
+		return newBytesStreamReader(target, data), nil
 	}
 	if f.hdr == nil {
 		return nil, newError(ErrBadHeader, "header is missing", "open_stream", string(canonical), -1, nil)
@@ -288,14 +302,7 @@ func (f *File) OpenStream(path string) (StreamReader, error) {
 		if target.Size == 0 {
 			return newBytesStreamReader(target, nil), nil
 		}
-		data, err := readMiniStreamData(
-			f.miniData,
-			f.miniFAT,
-			f.hdr,
-			entry.StartSector,
-			target.Size,
-			f.opt.MaxChainLength,
-		)
+		data, err := readMiniStreamData(f.miniData, f.miniFAT, f.hdr, entry.StartSector, target.Size, f.opt.MaxChainLength)
 		if err != nil {
 			return nil, err
 		}
@@ -370,11 +377,11 @@ func (f *File) GetNode(id NodeID) (Node, error) {
 	return n, nil
 }
 
-func (f *File) GetNodeByPath(path string) (Node, error) {
+func (f *File) GetNodeByPath(p string) (Node, error) {
 	if f == nil {
-		return Node{}, newError(ErrInvalidArgument, "file is nil", "node.get_by_path", path, -1, nil)
+		return Node{}, newError(ErrInvalidArgument, "file is nil", "node.get_by_path", p, -1, nil)
 	}
-	canonical, err := CanonicalPath(path)
+	canonical, err := CanonicalPath(p)
 	if err != nil {
 		return Node{}, err
 	}
@@ -449,35 +456,232 @@ func (f *File) bfsOrder() []NodeID {
 	return out
 }
 
-func (tx *Tx) PutStream(path string, r io.Reader, size int64) error {
+func (tx *Tx) PutStream(streamPath string, r io.Reader, size int64) error {
 	if tx == nil || tx.closed {
-		return newError(ErrTxClosed, "transaction is closed", "tx.put_stream", path, -1, nil)
+		return newError(ErrTxClosed, "transaction is closed", "tx.put_stream", streamPath, -1, nil)
 	}
 	if r == nil {
-		return newError(ErrInvalidArgument, "reader is nil", "tx.put_stream", path, -1, nil)
+		return newError(ErrInvalidArgument, "reader is nil", "tx.put_stream", streamPath, -1, nil)
 	}
-	return newError(ErrUnsupported, "write path is not implemented yet", "tx.put_stream", path, -1, nil)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return newError(ErrInvalidArgument, "failed to read stream data", "tx.put_stream", streamPath, -1, err)
+	}
+	if size >= 0 && int64(len(data)) != size {
+		return newError(ErrInvalidArgument, "stream size does not match declared size", "tx.put_stream", streamPath, -1, nil)
+	}
+	p, err := CanonicalPath(streamPath)
+	if err != nil {
+		return err
+	}
+	parentPath := string(ParentPath(p))
+	parentID, parentNode, ok := tx.findNodeByPath(parentPath)
+	if !ok {
+		return newError(ErrNotFound, "parent path not found", "tx.put_stream", parentPath, -1, nil)
+	}
+	if !parentNode.IsStorage() {
+		return newError(ErrInvalidArgument, "parent is not a storage", "tx.put_stream", parentPath, -1, nil)
+	}
+
+	if id, node, exists := tx.findNodeByPath(string(p)); exists {
+		if node.Type != NodeStream {
+			return newError(ErrConflict, "path exists and is not a stream", "tx.put_stream", string(p), -1, nil)
+		}
+		node.Size = int64(len(data))
+		tx.nodes[id] = node
+		e := tx.entries[id]
+		e.Size = int64(len(data))
+		tx.entries[id] = e
+		tx.streamData[id] = append([]byte(nil), data...)
+		return nil
+	}
+
+	if tx.file.opt.MaxObjectCount > 0 && len(tx.nodes)+1 > tx.file.opt.MaxObjectCount {
+		return newError(ErrLimitExceeded, "object count exceeded limit", "tx.put_stream", string(p), -1, nil)
+	}
+	id := tx.allocateID()
+	name := pathBase(string(p))
+	n := Node{
+		ID:       id,
+		Type:     NodeStream,
+		Path:     string(p),
+		Name:     name,
+		ParentID: parentID,
+		Size:     int64(len(data)),
+	}
+	tx.nodes[id] = n
+	tx.entries[id] = dirEntry{
+		ID:           uint32(id),
+		Name:         name,
+		ObjectType:   2,
+		LeftSibling:  cfbNoStream,
+		RightSibling: cfbNoStream,
+		Child:        cfbNoStream,
+		StartSector:  cfbEndOfChain,
+		Size:         int64(len(data)),
+	}
+	tx.streamData[id] = append([]byte(nil), data...)
+	tx.children[parentID] = append(tx.children[parentID], id)
+	parentNode.ChildCount = len(tx.children[parentID])
+	tx.nodes[parentID] = parentNode
+	tx.rebuildOrder()
+	return nil
 }
 
-func (tx *Tx) Delete(path string) error {
+func (tx *Tx) Delete(deletePath string) error {
 	if tx == nil || tx.closed {
-		return newError(ErrTxClosed, "transaction is closed", "tx.delete", path, -1, nil)
+		return newError(ErrTxClosed, "transaction is closed", "tx.delete", deletePath, -1, nil)
 	}
-	return newError(ErrUnsupported, "delete is not implemented yet", "tx.delete", path, -1, nil)
+	p, err := CanonicalPath(deletePath)
+	if err != nil {
+		return err
+	}
+	if p == "/" {
+		return newError(ErrInvalidArgument, "cannot delete root", "tx.delete", string(p), -1, nil)
+	}
+	id, node, ok := tx.findNodeByPath(string(p))
+	if !ok {
+		return newError(ErrNotFound, "path not found", "tx.delete", string(p), -1, nil)
+	}
+	toDelete := tx.collectSubtree(id)
+	parentID := node.ParentID
+	for _, did := range toDelete {
+		delete(tx.nodes, did)
+		delete(tx.entries, did)
+		delete(tx.streamData, did)
+		delete(tx.children, did)
+	}
+	tx.children[parentID] = filterNodeID(tx.children[parentID], toDelete)
+	if parent, ok := tx.nodes[parentID]; ok {
+		parent.ChildCount = len(tx.children[parentID])
+		tx.nodes[parentID] = parent
+	}
+	tx.rebuildOrder()
+	return nil
 }
 
 func (tx *Tx) Rename(oldPath, newPath string) error {
 	if tx == nil || tx.closed {
 		return newError(ErrTxClosed, "transaction is closed", "tx.rename", oldPath, -1, nil)
 	}
-	return newError(ErrUnsupported, "rename is not implemented yet", "tx.rename", oldPath, -1, nil)
+	oldP, err := CanonicalPath(oldPath)
+	if err != nil {
+		return err
+	}
+	newP, err := CanonicalPath(newPath)
+	if err != nil {
+		return err
+	}
+	if oldP == "/" {
+		return newError(ErrInvalidArgument, "cannot rename root", "tx.rename", string(oldP), -1, nil)
+	}
+	id, node, ok := tx.findNodeByPath(string(oldP))
+	if !ok {
+		return newError(ErrNotFound, "old path not found", "tx.rename", string(oldP), -1, nil)
+	}
+	if _, _, exists := tx.findNodeByPath(string(newP)); exists {
+		return newError(ErrConflict, "new path already exists", "tx.rename", string(newP), -1, nil)
+	}
+	parentPath := string(ParentPath(newP))
+	parentID, parentNode, ok := tx.findNodeByPath(parentPath)
+	if !ok {
+		return newError(ErrNotFound, "new parent path not found", "tx.rename", parentPath, -1, nil)
+	}
+	if !parentNode.IsStorage() {
+		return newError(ErrInvalidArgument, "new parent is not a storage", "tx.rename", parentPath, -1, nil)
+	}
+
+	oldParentID := node.ParentID
+	node.Path = string(newP)
+	node.Name = pathBase(string(newP))
+	node.ParentID = parentID
+	tx.nodes[id] = node
+	if e, ok := tx.entries[id]; ok {
+		e.Name = node.Name
+		tx.entries[id] = e
+	}
+
+	oldPrefix := string(oldP)
+	newPrefix := string(newP)
+	oldLower := strings.ToLower(oldPrefix)
+	for _, did := range tx.collectSubtree(id) {
+		if did == id {
+			continue
+		}
+		n := tx.nodes[did]
+		pLower := strings.ToLower(n.Path)
+		if pLower == oldLower || strings.HasPrefix(pLower, oldLower+"/") {
+			suffix := n.Path[len(oldPrefix):]
+			n.Path = newPrefix + suffix
+			tx.nodes[did] = n
+		}
+	}
+
+	tx.children[oldParentID] = filterNodeID(tx.children[oldParentID], []NodeID{id})
+	tx.children[parentID] = filterNodeID(tx.children[parentID], []NodeID{id})
+	tx.children[parentID] = append(tx.children[parentID], id)
+
+	if p, ok := tx.nodes[oldParentID]; ok {
+		p.ChildCount = len(tx.children[oldParentID])
+		tx.nodes[oldParentID] = p
+	}
+	parentNode.ChildCount = len(tx.children[parentID])
+	tx.nodes[parentID] = parentNode
+	tx.rebuildOrder()
+	return nil
 }
 
-func (tx *Tx) CreateStorage(path string) error {
+func (tx *Tx) CreateStorage(storagePath string) error {
 	if tx == nil || tx.closed {
-		return newError(ErrTxClosed, "transaction is closed", "tx.create_storage", path, -1, nil)
+		return newError(ErrTxClosed, "transaction is closed", "tx.create_storage", storagePath, -1, nil)
 	}
-	return newError(ErrUnsupported, "create storage is not implemented yet", "tx.create_storage", path, -1, nil)
+	p, err := CanonicalPath(storagePath)
+	if err != nil {
+		return err
+	}
+	if p == "/" {
+		return nil
+	}
+	if _, _, exists := tx.findNodeByPath(string(p)); exists {
+		return newError(ErrConflict, "path already exists", "tx.create_storage", string(p), -1, nil)
+	}
+	parentPath := string(ParentPath(p))
+	parentID, parentNode, ok := tx.findNodeByPath(parentPath)
+	if !ok {
+		return newError(ErrNotFound, "parent path not found", "tx.create_storage", parentPath, -1, nil)
+	}
+	if !parentNode.IsStorage() {
+		return newError(ErrInvalidArgument, "parent is not a storage", "tx.create_storage", parentPath, -1, nil)
+	}
+	if tx.file.opt.MaxObjectCount > 0 && len(tx.nodes)+1 > tx.file.opt.MaxObjectCount {
+		return newError(ErrLimitExceeded, "object count exceeded limit", "tx.create_storage", string(p), -1, nil)
+	}
+
+	id := tx.allocateID()
+	name := pathBase(string(p))
+	n := Node{
+		ID:       id,
+		Type:     NodeStorage,
+		Path:     string(p),
+		Name:     name,
+		ParentID: parentID,
+	}
+	tx.nodes[id] = n
+	tx.entries[id] = dirEntry{
+		ID:           uint32(id),
+		Name:         name,
+		ObjectType:   1,
+		LeftSibling:  cfbNoStream,
+		RightSibling: cfbNoStream,
+		Child:        cfbNoStream,
+		StartSector:  cfbEndOfChain,
+		Size:         0,
+	}
+	tx.children[parentID] = append(tx.children[parentID], id)
+	parentNode.ChildCount = len(tx.children[parentID])
+	tx.nodes[parentID] = parentNode
+	tx.rebuildOrder()
+	return nil
 }
 
 func (tx *Tx) Commit(ctx context.Context, opt CommitOptions) (*CommitResult, error) {
@@ -494,14 +698,30 @@ func (tx *Tx) Commit(ctx context.Context, opt CommitOptions) (*CommitResult, err
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, newError(ErrCommitFailed, "commit timed out", "tx.commit", "", -1, ctx.Err())
 	}
+	// v1: Incremental strategy falls back to full rewrite.
+
+	snapshot, err := tx.serializeFullRewrite()
+	if err != nil {
+		return nil, newError(ErrCommitFailed, "serialize failed", "tx.commit", "", -1, err)
+	}
+	if err := writeBackendBytes(tx.file.wb, snapshot); err != nil {
+		return nil, newError(ErrCommitFailed, "write backend failed", "tx.commit", "", -1, err)
+	}
+	tx.file.mu.Lock()
+	if err := tx.file.reloadStateFromBytes(snapshot); err != nil {
+		tx.file.mu.Unlock()
+		return nil, newError(ErrCommitFailed, "reload committed state failed", "tx.commit", "", -1, err)
+	}
+	tx.file.mu.Unlock()
+
 	if tx.file.wb != nil && opt.Sync {
 		if err := tx.file.wb.Sync(); err != nil {
 			return nil, newError(ErrCommitFailed, "sync failed", "tx.commit", "", -1, err)
 		}
 	}
-	size := tx.file.rb.Size()
+	size := int64(len(snapshot))
 	return &CommitResult{
-		BytesWritten: 0,
+		BytesWritten: size,
 		NewSize:      size,
 		BackendKind:  backendKind(tx.file.rb),
 	}, nil
@@ -554,14 +774,15 @@ func newEmptyFile(rb storage.ReadBackend, wb storage.WriteBackend, opt OpenOptio
 		Name: "Root Entry",
 	}
 	return &File{
-		rb:       rb,
-		wb:       wb,
-		opt:      opt,
-		root:     root,
-		nodes:    map[NodeID]Node{0: root},
-		order:    []NodeID{0},
-		children: map[NodeID][]NodeID{},
-		entries:  map[NodeID]dirEntry{},
+		rb:         rb,
+		wb:         wb,
+		opt:        opt,
+		root:       root,
+		nodes:      map[NodeID]Node{0: root},
+		order:      []NodeID{0},
+		children:   map[NodeID][]NodeID{},
+		entries:    map[NodeID]dirEntry{},
+		streamData: map[NodeID][]byte{},
 	}, nil
 }
 
@@ -580,6 +801,196 @@ func buildChildrenIndex(order []NodeID, nodes map[NodeID]Node) map[NodeID][]Node
 	return children
 }
 
+func cloneNodes(in map[NodeID]Node) map[NodeID]Node {
+	out := make(map[NodeID]Node, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneEntries(in map[NodeID]dirEntry) map[NodeID]dirEntry {
+	out := make(map[NodeID]dirEntry, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneChildren(in map[NodeID][]NodeID) map[NodeID][]NodeID {
+	out := make(map[NodeID][]NodeID, len(in))
+	for k, v := range in {
+		out[k] = append([]NodeID(nil), v...)
+	}
+	return out
+}
+
+func cloneStreamData(in map[NodeID][]byte) map[NodeID][]byte {
+	out := make(map[NodeID][]byte, len(in))
+	for k, v := range in {
+		out[k] = append([]byte(nil), v...)
+	}
+	return out
+}
+
+func maxNodeID(nodes map[NodeID]Node) NodeID {
+	var max NodeID
+	for id := range nodes {
+		if id > max {
+			max = id
+		}
+	}
+	return max
+}
+
+func (tx *Tx) allocateID() NodeID {
+	id := tx.nextID
+	tx.nextID++
+	return id
+}
+
+func (tx *Tx) findNodeByPath(p string) (NodeID, Node, bool) {
+	for _, id := range tx.order {
+		n, ok := tx.nodes[id]
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(n.Path, p) {
+			return id, n, true
+		}
+	}
+	return 0, Node{}, false
+}
+
+func (tx *Tx) collectSubtree(rootID NodeID) []NodeID {
+	out := make([]NodeID, 0, 8)
+	stack := []NodeID{rootID}
+	seen := map[NodeID]struct{}{}
+	for len(stack) > 0 {
+		id := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+		for _, child := range tx.children[id] {
+			stack = append(stack, child)
+		}
+	}
+	return out
+}
+
+func (tx *Tx) rebuildOrder() {
+	order := make([]NodeID, 0, len(tx.nodes))
+	order = append(order, 0)
+	var walk func(parent NodeID)
+	walk = func(parent NodeID) {
+		children := append([]NodeID(nil), tx.children[parent]...)
+		sort.Slice(children, func(i, j int) bool {
+			ni := tx.nodes[children[i]]
+			nj := tx.nodes[children[j]]
+			if !strings.EqualFold(ni.Path, nj.Path) {
+				return strings.ToLower(ni.Path) < strings.ToLower(nj.Path)
+			}
+			return children[i] < children[j]
+		})
+		tx.children[parent] = children
+		for _, cid := range children {
+			n, ok := tx.nodes[cid]
+			if !ok {
+				continue
+			}
+			order = append(order, cid)
+			if n.IsStorage() {
+				walk(cid)
+			}
+		}
+	}
+	walk(0)
+	tx.order = order
+}
+
+func (tx *Tx) bytesWritten() int64 {
+	var n int64
+	for _, data := range tx.streamData {
+		n += int64(len(data))
+	}
+	return n
+}
+
+func filterNodeID(in []NodeID, remove []NodeID) []NodeID {
+	if len(in) == 0 || len(remove) == 0 {
+		return in
+	}
+	rm := make(map[NodeID]struct{}, len(remove))
+	for _, id := range remove {
+		rm[id] = struct{}{}
+	}
+	out := in[:0]
+	for _, id := range in {
+		if _, ok := rm[id]; ok {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+func pathBase(p string) string {
+	if p == "/" {
+		return "/"
+	}
+	_, b := path.Split(p)
+	name, err := DecodeSegment(b)
+	if err != nil || name == "" {
+		return b
+	}
+	return name
+}
+
+func writeBackendBytes(wb storage.WriteBackend, data []byte) error {
+	if wb == nil {
+		return newError(ErrReadOnly, "write backend is nil", "backend.write_all", "", -1, nil)
+	}
+	off := int64(0)
+	for off < int64(len(data)) {
+		n, err := wb.WriteAt(data[off:], off)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return io.ErrShortWrite
+		}
+		off += int64(n)
+	}
+	if err := wb.Truncate(int64(len(data))); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *File) reloadStateFromBytes(snapshot []byte) error {
+	reloaded, err := OpenBytes(snapshot, f.opt)
+	if err != nil {
+		return err
+	}
+	defer reloaded.Close()
+
+	f.root = reloaded.root
+	f.hdr = reloaded.hdr
+	f.fat = append([]uint32(nil), reloaded.fat...)
+	f.miniFAT = append([]uint32(nil), reloaded.miniFAT...)
+	f.miniData = append([]byte(nil), reloaded.miniData...)
+	f.nodes = cloneNodes(reloaded.nodes)
+	f.order = append([]NodeID(nil), reloaded.order...)
+	f.children = cloneChildren(reloaded.children)
+	f.entries = cloneEntries(reloaded.entries)
+	f.streamData = map[NodeID][]byte{}
+	f.report = reloaded.report
+	return nil
+}
+
 type fileBackend struct {
 	name     string
 	file     *os.File
@@ -591,6 +1002,7 @@ func newFileBackend(name string, file *os.File, readOnly bool) *fileBackend {
 }
 
 func (b *fileBackend) ReadAt(p []byte, off int64) (n int, err error) { return b.file.ReadAt(p, off) }
+
 func (b *fileBackend) Size() int64 {
 	st, err := b.file.Stat()
 	if err != nil {
@@ -598,25 +1010,30 @@ func (b *fileBackend) Size() int64 {
 	}
 	return st.Size()
 }
+
 func (b *fileBackend) Close() error { return b.file.Close() }
+
 func (b *fileBackend) WriteAt(p []byte, off int64) (n int, err error) {
 	if b.readOnly {
 		return 0, newError(ErrReadOnly, "file backend is read-only", "backend.write_at", b.name, off, nil)
 	}
 	return b.file.WriteAt(p, off)
 }
+
 func (b *fileBackend) Truncate(size int64) error {
 	if b.readOnly {
 		return newError(ErrReadOnly, "file backend is read-only", "backend.truncate", b.name, -1, nil)
 	}
 	return b.file.Truncate(size)
 }
+
 func (b *fileBackend) Sync() error {
 	if b.readOnly {
 		return nil
 	}
 	return b.file.Sync()
 }
+
 func (b *fileBackend) Info() storage.Info {
 	return storage.Info{
 		Kind:     storage.KindFile,

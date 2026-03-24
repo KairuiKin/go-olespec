@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"io"
 	"time"
+
+	"github.com/KairuiKin/go-olespec/pkg/oleds"
 )
 
 func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
@@ -82,7 +84,7 @@ func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 			continue
 		}
 
-		sum, readBytes, isOLE, readErr := hashAndProbeStream(sr)
+		sum, readBytes, isOLE, head, readErr := hashAndProbeStream(sr)
 		_ = sr.Close()
 		if readErr != nil {
 			artifact.Status = ArtifactFailed
@@ -96,6 +98,16 @@ func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 		artifact.Size = readBytes
 		if isOLE {
 			artifact.Kind = ArtifactOLEFile
+		}
+		if opt.DetectOLEDS {
+			d := oleds.Detect(n.Path, head)
+			switch d.Kind {
+			case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
+				artifact.Kind = ArtifactOleObj
+				if d.Kind != oleds.KindUnknown {
+					artifact.Note = "oleds:" + string(d.Kind)
+				}
+			}
 		}
 
 		if opt.Deduplicate {
@@ -146,11 +158,12 @@ func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 	return report, nil
 }
 
-func hashAndProbeStream(r io.Reader) (sha string, total int64, isOLE bool, err error) {
+func hashAndProbeStream(r io.Reader) (sha string, total int64, isOLE bool, head []byte, err error) {
 	h := sha256.New()
 	buf := make([]byte, 32*1024)
 	var first8 [8]byte
 	firstRead := 0
+	head = make([]byte, 0, 64*1024)
 	for {
 		n, e := r.Read(buf)
 		if n > 0 {
@@ -163,19 +176,27 @@ func hashAndProbeStream(r io.Reader) (sha string, total int64, isOLE bool, err e
 				firstRead += copyN
 			}
 			if _, wErr := h.Write(buf[:n]); wErr != nil {
-				return "", total, false, wErr
+				return "", total, false, nil, wErr
 			}
 			total += int64(n)
+			if len(head) < cap(head) {
+				remain := cap(head) - len(head)
+				copyN := n
+				if copyN > remain {
+					copyN = remain
+				}
+				head = append(head, buf[:copyN]...)
+			}
 		}
 		if e == io.EOF {
 			break
 		}
 		if e != nil {
-			return "", total, false, e
+			return "", total, false, nil, e
 		}
 	}
 	isOLE = firstRead == 8 && first8 == cfbSignature
-	return hex.EncodeToString(h.Sum(nil)), total, isOLE, nil
+	return hex.EncodeToString(h.Sum(nil)), total, isOLE, head, nil
 }
 
 func asOLEError(err error) *OLEError {
