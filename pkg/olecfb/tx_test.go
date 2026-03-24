@@ -309,3 +309,51 @@ func TestTxCommitLargeStreamWithIncrementalFallback(t *testing.T) {
 		t.Fatalf("unexpected tail byte: 0x%02X", tail[0])
 	}
 }
+
+func TestTxCommitPreservesV4Geometry(t *testing.T) {
+	base, _ := buildValidV4FileWithSingleNormalStream()
+	f, err := OpenBytesRW(base, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytesRW returned error: %v", err)
+	}
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if err := tx.PutStream("/Blob", bytes.NewReader([]byte("v4-keep")), int64(len("v4-keep"))); err != nil {
+		t.Fatalf("PutStream returned error: %v", err)
+	}
+	if _, err := tx.Commit(nil, CommitOptions{}); err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+
+	snap, err := f.SnapshotBytes()
+	if err != nil {
+		t.Fatalf("SnapshotBytes returned error: %v", err)
+	}
+	reopened, err := OpenBytes(snap, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	if reopened.hdr == nil {
+		t.Fatal("missing header")
+	}
+	if reopened.hdr.MajorVersion != cfbMajorVersion4 {
+		t.Fatalf("unexpected major version: %d", reopened.hdr.MajorVersion)
+	}
+	if reopened.hdr.SectorShift != cfbSectorShiftV4 {
+		t.Fatalf("unexpected sector shift: %d", reopened.hdr.SectorShift)
+	}
+	sr, err := reopened.OpenStream("/Blob")
+	if err != nil {
+		t.Fatalf("OpenStream returned error: %v", err)
+	}
+	defer sr.Close()
+	got := make([]byte, len("v4-keep"))
+	if _, err := io.ReadFull(sr, got); err != nil {
+		t.Fatalf("ReadFull returned error: %v", err)
+	}
+	if string(got) != "v4-keep" {
+		t.Fatalf("unexpected payload: %q", string(got))
+	}
+}

@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	serializerSectorSize     = 512
-	serializerSectorShift    = cfbSectorShiftV3
+	serializerDefaultSectorSize = 512
 	serializerMiniSectorSize = 64
 )
 
@@ -29,6 +28,7 @@ type streamLayout struct {
 }
 
 func (tx *Tx) serializeFullRewrite() ([]byte, error) {
+	majorVersion, sectorShift, sectorSize := tx.targetContainerGeometry()
 	graph, err := tx.normalizeGraph()
 	if err != nil {
 		return nil, err
@@ -65,10 +65,10 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	regularSectors := countRegularStreamSectors(regularStreams, serializerSectorSize)
-	miniStreamSectors := ceilDiv(len(miniData), serializerSectorSize)
-	miniFATSectors := ceilDiv(len(miniFAT)*4, serializerSectorSize)
-	dirSectors := ceilDiv(len(dirBytes), serializerSectorSize)
+	regularSectors := countRegularStreamSectors(regularStreams, sectorSize)
+	miniStreamSectors := ceilDiv(len(miniData), sectorSize)
+	miniFATSectors := ceilDiv(len(miniFAT)*4, sectorSize)
+	dirSectors := ceilDiv(len(dirBytes), sectorSize)
 	if dirSectors == 0 {
 		dirSectors = 1
 	}
@@ -76,9 +76,9 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	nonFATSectors := regularSectors + miniStreamSectors + miniFATSectors + dirSectors
 	fatSectors, difatSectors := solveFATAndDIFATSectorCount(
 		nonFATSectors,
-		serializerSectorSize/4,
+		sectorSize/4,
 		cfbNumDifatEntries,
-		serializerSectorSize/4-1,
+		sectorSize/4-1,
 	)
 	if fatSectors <= 0 {
 		fatSectors = 1
@@ -90,13 +90,13 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	}
 	sectors := make([][]byte, totalSectors)
 	for i := range sectors {
-		sectors[i] = make([]byte, serializerSectorSize)
+		sectors[i] = make([]byte, sectorSize)
 	}
 
 	cursor := uint32(0)
 	for i := range regularStreams {
 		st := &regularStreams[i]
-		secCount := ceilDiv(len(st.data), serializerSectorSize)
+		secCount := ceilDiv(len(st.data), sectorSize)
 		if secCount == 0 {
 			st.start = cfbEndOfChain
 			e := dirEntries[st.entryID]
@@ -110,7 +110,7 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 		e.StartSector = st.start
 		e.Size = st.size
 		dirEntries[st.entryID] = e
-		writeChainData(sectors, cursor, serializerSectorSize, st.data)
+		writeChainData(sectors, cursor, sectorSize, st.data)
 		markChainFAT(fatEntries, cursor, secCount)
 		cursor += uint32(secCount)
 	}
@@ -118,7 +118,7 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	var miniStreamStart uint32 = cfbEndOfChain
 	if miniStreamSectors > 0 {
 		miniStreamStart = cursor
-		writeChainData(sectors, cursor, serializerSectorSize, miniData)
+		writeChainData(sectors, cursor, sectorSize, miniData)
 		markChainFAT(fatEntries, cursor, miniStreamSectors)
 		cursor += uint32(miniStreamSectors)
 	}
@@ -126,11 +126,11 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	var miniFATStart uint32 = cfbEndOfChain
 	if miniFATSectors > 0 {
 		miniFATStart = cursor
-		miniRaw := make([]byte, miniFATSectors*serializerSectorSize)
+		miniRaw := make([]byte, miniFATSectors*sectorSize)
 		for i, v := range miniFAT {
 			binary.LittleEndian.PutUint32(miniRaw[i*4:i*4+4], v)
 		}
-		writeChainData(sectors, cursor, serializerSectorSize, miniRaw)
+		writeChainData(sectors, cursor, sectorSize, miniRaw)
 		markChainFAT(fatEntries, cursor, miniFATSectors)
 		cursor += uint32(miniFATSectors)
 	}
@@ -140,9 +140,9 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirRaw := make([]byte, dirSectors*serializerSectorSize)
+	dirRaw := make([]byte, dirSectors*sectorSize)
 	copy(dirRaw, dirBytes)
-	writeChainData(sectors, cursor, serializerSectorSize, dirRaw)
+	writeChainData(sectors, cursor, sectorSize, dirRaw)
 	markChainFAT(fatEntries, cursor, dirSectors)
 	cursor += uint32(dirSectors)
 
@@ -169,8 +169,8 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 
 	for i, sid := range fatSectorIDs {
 		buf := sectors[sid]
-		for j := 0; j < serializerSectorSize/4; j++ {
-			idx := i*(serializerSectorSize/4) + j
+		for j := 0; j < sectorSize/4; j++ {
+			idx := i*(sectorSize/4) + j
 			v := cfbFreeSector
 			if idx < len(fatEntries) {
 				v = fatEntries[idx]
@@ -178,7 +178,7 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 			binary.LittleEndian.PutUint32(buf[j*4:j*4+4], v)
 		}
 	}
-	writeDIFATSectors(sectors, difatSectorIDs, fatSectorIDs, serializerSectorSize/4-1)
+	writeDIFATSectors(sectors, difatSectorIDs, fatSectorIDs, sectorSize/4-1)
 
 	root := dirEntries[0]
 	root.StartSector = miniStreamStart
@@ -191,9 +191,9 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	}
 	for i := 0; i < dirSectors; i++ {
 		sid := dirStart + uint32(i)
-		copy(sectors[sid], make([]byte, serializerSectorSize))
-		start := i * serializerSectorSize
-		end := start + serializerSectorSize
+		copy(sectors[sid], make([]byte, sectorSize))
+		start := i * sectorSize
+		end := start + sectorSize
 		if end > len(dirBytes) {
 			end = len(dirBytes)
 		}
@@ -203,20 +203,30 @@ func (tx *Tx) serializeFullRewrite() ([]byte, error) {
 	}
 
 	header := buildSerializedHeader(
+		majorVersion,
+		sectorShift,
 		fatSectorIDs,
 		difatSectorIDs,
 		dirStart,
+		dirSectors,
 		miniFATStart,
 		miniFATSectors,
 	)
 
-	out := make([]byte, cfbHeaderSize+len(sectors)*serializerSectorSize)
+	out := make([]byte, sectorSize+len(sectors)*sectorSize)
 	copy(out[:cfbHeaderSize], header)
 	for i := range sectors {
-		start := cfbHeaderSize + i*serializerSectorSize
-		copy(out[start:start+serializerSectorSize], sectors[i])
+		start := sectorSize + i*sectorSize
+		copy(out[start:start+sectorSize], sectors[i])
 	}
 	return out, nil
+}
+
+func (tx *Tx) targetContainerGeometry() (uint16, uint16, int) {
+	if tx != nil && tx.file != nil && tx.file.hdr != nil && tx.file.hdr.MajorVersion == cfbMajorVersion4 {
+		return cfbMajorVersion4, cfbSectorShiftV4, 1 << cfbSectorShiftV4
+	}
+	return cfbMajorVersion3, cfbSectorShiftV3, serializerDefaultSectorSize
 }
 
 func (tx *Tx) normalizeGraph() (*normalizedGraph, error) {
@@ -691,20 +701,27 @@ func encodeDirNameUTF16(name string) ([]byte, uint16, error) {
 }
 
 func buildSerializedHeader(
+	majorVersion uint16,
+	sectorShift uint16,
 	fatSectorIDs []uint32,
 	difatSectorIDs []uint32,
 	dirStart uint32,
+	dirSectors int,
 	miniFATStart uint32,
 	miniFATSectors int,
 ) []byte {
 	buf := make([]byte, cfbHeaderSize)
 	copy(buf[0:8], cfbSignature[:])
 	binary.LittleEndian.PutUint16(buf[24:26], 0x003E)
-	binary.LittleEndian.PutUint16(buf[26:28], cfbMajorVersion3)
+	binary.LittleEndian.PutUint16(buf[26:28], majorVersion)
 	binary.LittleEndian.PutUint16(buf[28:30], cfbByteOrder)
-	binary.LittleEndian.PutUint16(buf[30:32], serializerSectorShift)
+	binary.LittleEndian.PutUint16(buf[30:32], sectorShift)
 	binary.LittleEndian.PutUint16(buf[32:34], cfbMiniSectorShift)
-	binary.LittleEndian.PutUint32(buf[40:44], 0) // v3 must be zero
+	if majorVersion == cfbMajorVersion4 {
+		binary.LittleEndian.PutUint32(buf[40:44], uint32(dirSectors))
+	} else {
+		binary.LittleEndian.PutUint32(buf[40:44], 0) // v3 must be zero
+	}
 	binary.LittleEndian.PutUint32(buf[44:48], uint32(len(fatSectorIDs)))
 	binary.LittleEndian.PutUint32(buf[48:52], dirStart)
 	binary.LittleEndian.PutUint32(buf[52:56], 0)
