@@ -165,7 +165,12 @@ func OpenFile(path string, opt OpenOptions) (*File, error) {
 	if err != nil {
 		return nil, newError(ErrNotFound, "open file failed", "open_file", path, -1, err)
 	}
-	return Open(newFileBackend(path, fp, true), opt)
+	f, openErr := Open(newFileBackend(path, fp, true), opt)
+	if openErr != nil {
+		_ = fp.Close()
+		return nil, openErr
+	}
+	return f, nil
 }
 
 func OpenBytes(buf []byte, opt OpenOptions) (*File, error) {
