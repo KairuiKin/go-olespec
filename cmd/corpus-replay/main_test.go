@@ -574,6 +574,79 @@ func TestRunReplaySaveTrendRequiresTrendDir(t *testing.T) {
 	}
 }
 
+func TestRunReplaySaveTrendPrune(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	writeTrendReport(t, filepath.Join(history, "r1.json"), replayReport{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Options:     replayOptions{RunID: "h1"},
+		Summary:     replaySummary{Processed: 1, Success: 1, PassRate: 1},
+	})
+	writeTrendReport(t, filepath.Join(history, "r2.json"), replayReport{
+		GeneratedAt: "2026-01-02T00:00:00Z",
+		Options:     replayOptions{RunID: "h2"},
+		Summary:     replaySummary{Processed: 1, Success: 1, PassRate: 1},
+	})
+	writeTrendReport(t, filepath.Join(history, "r3.json"), replayReport{
+		GeneratedAt: "2026-01-03T00:00:00Z",
+		Options:     replayOptions{RunID: "h3"},
+		Summary:     replaySummary{Processed: 1, Success: 1, PassRate: 1},
+	})
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-trend-dir", history,
+		"-trend-limit", "2",
+		"-run-id", "cur",
+		"-save-trend",
+		"-save-trend-prune",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(history, "*.json"))
+	if err != nil {
+		t.Fatalf("Glob returned error: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 trend files after prune, got %d", len(files))
+	}
+	foundCur := false
+	for _, p := range files {
+		buf, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("ReadFile %s returned error: %v", p, err)
+		}
+		var rep replayReport
+		if err := json.Unmarshal(buf, &rep); err != nil {
+			t.Fatalf("Unmarshal %s returned error: %v", p, err)
+		}
+		if rep.Options.RunID == "cur" {
+			foundCur = true
+		}
+	}
+	if !foundCur {
+		t.Fatal("expected current saved trend report to be preserved")
+	}
+}
+
+func TestRunReplaySaveTrendPruneValidation(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-save-trend-prune"}, &out); err == nil {
+		t.Fatal("expected save-trend-prune validation error without save-trend")
+	}
+	if err := run([]string{"-save-trend", "-save-trend-prune", "-trend-dir", ".", "-trend-limit", "0"}, &out); err == nil {
+		t.Fatal("expected save-trend-prune validation error for trend-limit")
+	}
+}
+
 func buildSampleCFB(t *testing.T) []byte {
 	t.Helper()
 	f, err := olecfb.CreateInMemory(olecfb.CreateOptions{})

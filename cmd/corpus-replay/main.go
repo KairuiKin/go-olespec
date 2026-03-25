@@ -27,6 +27,7 @@ type replayOptions struct {
 	TrendLimit      int      `json:"trend_limit,omitempty"`
 	SaveTrend       bool     `json:"save_trend,omitempty"`
 	SaveTrendName   string   `json:"save_trend_name,omitempty"`
+	SaveTrendPrune  bool     `json:"save_trend_prune,omitempty"`
 	IncludeRaw      bool     `json:"include_raw"`
 	DetectImages    bool     `json:"detect_images"`
 	DetectOLEDS     bool     `json:"detect_oleds"`
@@ -171,6 +172,7 @@ func run(args []string, out io.Writer) error {
 		trendLimit              = fset.Int("trend-limit", 20, "max historical points to keep for trend, <=0 means unlimited")
 		saveTrend               = fset.Bool("save-trend", false, "save current replay report JSON into trend-dir")
 		saveTrendName           = fset.String("save-trend-name", "", "optional trend report file name when save-trend is enabled")
+		saveTrendPrune          = fset.Bool("save-trend-prune", false, "when saving trend report, prune oldest trend JSON files to trend-limit")
 		includeRaw              = fset.Bool("include-raw", false, "include raw artifact payloads in extraction")
 		detectImages            = fset.Bool("detect-images", true, "enable image signature detection")
 		detectOLEDS             = fset.Bool("detect-oleds", true, "enable OLEDS stream detection")
@@ -222,6 +224,12 @@ func run(args []string, out io.Writer) error {
 	}
 	if *saveTrend && strings.TrimSpace(*trendDir) == "" {
 		return errors.New("save-trend requires -trend-dir")
+	}
+	if *saveTrendPrune && !*saveTrend {
+		return errors.New("save-trend-prune requires -save-trend")
+	}
+	if *saveTrendPrune && *trendLimit <= 0 {
+		return errors.New("save-trend-prune requires trend-limit > 0")
 	}
 	if *minPassRate > 1 {
 		return errors.New("min-pass-rate must be <= 1")
@@ -275,6 +283,7 @@ func run(args []string, out io.Writer) error {
 		TrendLimit:      *trendLimit,
 		SaveTrend:       *saveTrend,
 		SaveTrendName:   strings.TrimSpace(*saveTrendName),
+		SaveTrendPrune:  *saveTrendPrune,
 		IncludeRaw:      *includeRaw,
 		DetectImages:    *detectImages,
 		DetectOLEDS:     *detectOLEDS,
@@ -461,8 +470,14 @@ func run(args []string, out io.Writer) error {
 			return err
 		}
 		if *saveTrend {
-			if _, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf); saveErr != nil {
+			savedPath, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf)
+			if saveErr != nil {
 				return saveErr
+			}
+			if *saveTrendPrune {
+				if _, pruneErr := pruneTrendReports(strings.TrimSpace(*trendDir), *trendLimit, savedPath); pruneErr != nil {
+					return pruneErr
+				}
 			}
 		}
 		return gateErr
@@ -479,8 +494,14 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 	if *saveTrend {
-		if _, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf); saveErr != nil {
+		savedPath, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf)
+		if saveErr != nil {
 			return saveErr
+		}
+		if *saveTrendPrune {
+			if _, pruneErr := pruneTrendReports(strings.TrimSpace(*trendDir), *trendLimit, savedPath); pruneErr != nil {
+				return pruneErr
+			}
 		}
 	}
 	return gateErr
@@ -1009,6 +1030,76 @@ func buildTrendFileName(runID string) string {
 		return "replay-" + stamp + ".json"
 	}
 	return "replay-" + stamp + "-" + run + ".json"
+}
+
+func pruneTrendReports(dir string, keep int, preservePath string) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	absDir, err := filepath.Abs(strings.TrimSpace(dir))
+	if err != nil {
+		return 0, err
+	}
+	preserveAbs := ""
+	if strings.TrimSpace(preservePath) != "" {
+		preserveAbs, _ = filepath.Abs(strings.TrimSpace(preservePath))
+	}
+	entries := make([]trendEntry, 0, keep+8)
+	err = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) != ".json" {
+			return nil
+		}
+		rep, loadErr := loadReplayReport(path)
+		if loadErr != nil {
+			return nil
+		}
+		when := parseReportTime(rep.GeneratedAt)
+		if when.IsZero() {
+			if info, statErr := os.Stat(path); statErr == nil {
+				when = info.ModTime()
+			}
+		}
+		entries = append(entries, trendEntry{
+			Path:   path,
+			Report: rep,
+			When:   when,
+		})
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(entries) <= keep {
+		return 0, nil
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].When.Equal(entries[j].When) {
+			return entries[i].Path < entries[j].Path
+		}
+		return entries[i].When.Before(entries[j].When)
+	})
+
+	toDelete := len(entries) - keep
+	removed := 0
+	for i := 0; i < len(entries) && toDelete > 0; i++ {
+		p := entries[i].Path
+		pAbs, _ := filepath.Abs(p)
+		if preserveAbs != "" && strings.EqualFold(pAbs, preserveAbs) {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return removed, err
+		}
+		removed++
+		toDelete--
+	}
+	return removed, nil
 }
 
 func sanitizeFileToken(v string) string {

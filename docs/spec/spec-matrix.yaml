@@ -140,6 +140,7 @@ items:
       - "integration/corpus_replay_trend_summary"
       - "integration/corpus_replay_trend_gates"
       - "integration/corpus_replay_trend_save"
+      - "integration/corpus_replay_trend_prune"
       - "fuzz/olextract_write_artifacts"
 
   - id: PERF-001
