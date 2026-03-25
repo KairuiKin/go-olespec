@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KairuiKin/go-olespec/pkg/oleps"
@@ -343,6 +344,9 @@ func TestExtract_UnwrapOle10Native(t *testing.T) {
 	}
 	if grand.ParentID != child.ID {
 		t.Fatalf("unexpected nested parent id: got %q want %q", grand.ParentID, child.ID)
+	}
+	if !strings.HasPrefix(child.Note, "ole10native;file=inner.cfb") {
+		t.Fatalf("unexpected unwrapped note: %q", child.Note)
 	}
 }
 

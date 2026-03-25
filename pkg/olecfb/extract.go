@@ -329,6 +329,13 @@ func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, str
 		ParentID:     parent.ID,
 		SourceNodeID: source.ID,
 	}
+	artifact.Note = "ole10native"
+	if native.FileName != "" {
+		artifact.Note += ";file=" + native.FileName
+	}
+	if native.SourcePath != "" {
+		artifact.Note += ";src=" + native.SourcePath
+	}
 	if isOLE {
 		artifact.Kind = ArtifactOLEFile
 	}
@@ -343,7 +350,11 @@ func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, str
 		switch d.Kind {
 		case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
 			artifact.Kind = ArtifactOleObj
-			artifact.Note = "oleds:" + string(d.Kind)
+			if artifact.Note == "" {
+				artifact.Note = "oleds:" + string(d.Kind)
+			} else {
+				artifact.Note += ";detected=" + string(d.Kind)
+			}
 		}
 	}
 	if w.opt.Deduplicate {
