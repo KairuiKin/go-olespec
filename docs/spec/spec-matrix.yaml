@@ -141,6 +141,7 @@ items:
       - "integration/corpus_replay_trend_summary"
       - "integration/corpus_replay_trend_gates"
       - "integration/corpus_replay_partial_gates"
+      - "integration/corpus_replay_warning_gates"
       - "integration/corpus_replay_trend_save"
       - "integration/corpus_replay_trend_prune"
       - "integration/corpus_replay_report_files_policy"

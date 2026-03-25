@@ -62,6 +62,7 @@ type replaySummary struct {
 	Success       int            `json:"success"`
 	Failed        int            `json:"failed"`
 	Partial       int            `json:"partial"`
+	WarningsTotal int            `json:"warnings_total"`
 	ReportedFiles int            `json:"reported_files"`
 	OmittedFiles  int            `json:"omitted_files"`
 	PassRate      float64        `json:"pass_rate"`
@@ -124,6 +125,7 @@ type replayTrendPoint struct {
 	Success     int     `json:"success"`
 	Failed      int     `json:"failed"`
 	Partial     int     `json:"partial"`
+	Warnings    int     `json:"warnings"`
 	PassRate    float64 `json:"pass_rate"`
 }
 
@@ -133,6 +135,7 @@ type replayTrendDelta struct {
 	DeltaPassRate   float64 `json:"delta_pass_rate"`
 	DeltaFailed     int     `json:"delta_failed"`
 	DeltaPartial    int     `json:"delta_partial"`
+	DeltaWarnings   int     `json:"delta_warnings"`
 }
 
 type replayGateResult struct {
@@ -141,6 +144,7 @@ type replayGateResult struct {
 	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
 	MaxFailed               *int     `json:"max_failed,omitempty"`
 	MaxPartial              *int     `json:"max_partial,omitempty"`
+	MaxWarnings             *int     `json:"max_warnings,omitempty"`
 	MaxNewlyFailed          *int     `json:"max_newly_failed,omitempty"`
 	MaxNewFiles             *int     `json:"max_new_files,omitempty"`
 	MaxRemovedFiles         *int     `json:"max_removed_files,omitempty"`
@@ -148,6 +152,7 @@ type replayGateResult struct {
 	MaxPassRateDrop         *float64 `json:"max_pass_rate_drop,omitempty"`
 	MaxFailedIncrease       *int     `json:"max_failed_increase,omitempty"`
 	MaxPartialIncrease      *int     `json:"max_partial_increase,omitempty"`
+	MaxWarningIncrease      *int     `json:"max_warning_increase,omitempty"`
 	DenyErrorCodes          []string `json:"deny_error_codes,omitempty"`
 	MaxNewErrorCodes        *int     `json:"max_new_error_codes,omitempty"`
 	MaxErrorCodeRegressions *int     `json:"max_error_code_regressions,omitempty"`
@@ -193,6 +198,7 @@ func run(args []string, out io.Writer) error {
 		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
 		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
 		maxPartial              = fset.Int("max-partial", -1, "gate: maximum allowed partial files, negative disables")
+		maxWarnings             = fset.Int("max-warnings", -1, "gate: maximum allowed warning count, negative disables")
 		maxNewlyFailed          = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
 		maxNewFiles             = fset.Int("max-new-files", -1, "gate: maximum allowed new files vs baseline, negative disables")
 		maxRemovedFiles         = fset.Int("max-removed-files", -1, "gate: maximum allowed removed files vs baseline, negative disables")
@@ -200,6 +206,7 @@ func run(args []string, out io.Writer) error {
 		maxPassRateDrop         = fset.Float64("max-pass-rate-drop", -1, "gate: maximum allowed pass-rate drop vs latest trend point in [0,1], negative disables")
 		maxFailedIncrease       = fset.Int("max-failed-increase", -1, "gate: maximum allowed failed-files increase vs latest trend point, negative disables")
 		maxPartialIncrease      = fset.Int("max-partial-increase", -1, "gate: maximum allowed partial-files increase vs latest trend point, negative disables")
+		maxWarningIncrease      = fset.Int("max-warning-increase", -1, "gate: maximum allowed warning-count increase vs latest trend point, negative disables")
 		denyErrorCodes          = fset.String("deny-error-codes", "", "gate: comma-separated error codes that must not appear")
 		maxNewErrorCodes        = fset.Int("max-new-error-codes", -1, "gate: maximum allowed new error codes vs baseline, negative disables")
 		maxErrorCodeRegressions = fset.Int("max-error-code-regressions", -1, "gate: maximum allowed error codes with increased failure count vs baseline, negative disables")
@@ -243,6 +250,9 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxPartialIncrease >= 0 && trendDirTrim == "" {
 		return errors.New("max-partial-increase requires -trend-dir")
+	}
+	if *maxWarningIncrease >= 0 && trendDirTrim == "" {
+		return errors.New("max-warning-increase requires -trend-dir")
 	}
 	if *saveTrend && trendDirTrim == "" {
 		return errors.New("save-trend requires -trend-dir")
@@ -391,6 +401,7 @@ func run(args []string, out io.Writer) error {
 			item.ArtifactsOK = rep.Stats.ArtifactsOK
 			item.ArtifactsFail = rep.Stats.ArtifactsFailed
 			item.Warnings = len(rep.Warnings)
+			report.Summary.WarningsTotal += item.Warnings
 			report.Summary.Success++
 			if rep.Partial {
 				report.Summary.Partial++
@@ -450,6 +461,11 @@ func run(args []string, out io.Writer) error {
 		v := *maxPartial
 		maxPartialPtr = &v
 	}
+	var maxWarningsPtr *int
+	if *maxWarnings >= 0 {
+		v := *maxWarnings
+		maxWarningsPtr = &v
+	}
 	var maxNewlyFailedPtr *int
 	if *maxNewlyFailed >= 0 {
 		v := *maxNewlyFailed
@@ -485,6 +501,11 @@ func run(args []string, out io.Writer) error {
 		v := *maxPartialIncrease
 		maxPartialIncreasePtr = &v
 	}
+	var maxWarningIncreasePtr *int
+	if *maxWarningIncrease >= 0 {
+		v := *maxWarningIncrease
+		maxWarningIncreasePtr = &v
+	}
 	var maxNewErrorCodesPtr *int
 	if *maxNewErrorCodes >= 0 {
 		v := *maxNewErrorCodes
@@ -500,6 +521,7 @@ func run(args []string, out io.Writer) error {
 		minPassRatePtr,
 		maxFailedPtr,
 		maxPartialPtr,
+		maxWarningsPtr,
 		maxNewlyFailedPtr,
 		maxNewFilesPtr,
 		maxRemovedFilesPtr,
@@ -507,6 +529,7 @@ func run(args []string, out io.Writer) error {
 		maxPassRateDropPtr,
 		maxFailedIncreasePtr,
 		maxPartialIncreasePtr,
+		maxWarningIncreasePtr,
 		denyCodes,
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
@@ -767,6 +790,7 @@ func evaluateGates(
 	minPassRate *float64,
 	maxFailed *int,
 	maxPartial *int,
+	maxWarnings *int,
 	maxNewlyFailed *int,
 	maxNewFiles *int,
 	maxRemovedFiles *int,
@@ -774,6 +798,7 @@ func evaluateGates(
 	maxPassRateDrop *float64,
 	maxFailedIncrease *int,
 	maxPartialIncrease *int,
+	maxWarningIncrease *int,
 	denyErrorCodes []string,
 	maxNewErrorCodes *int,
 	maxErrorCodeRegressions *int,
@@ -783,11 +808,12 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minPassRate != nil || maxFailed != nil || maxPartial != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinPassRate:             minPassRate,
 		MaxFailed:               maxFailed,
 		MaxPartial:              maxPartial,
+		MaxWarnings:             maxWarnings,
 		MaxNewlyFailed:          maxNewlyFailed,
 		MaxNewFiles:             maxNewFiles,
 		MaxRemovedFiles:         maxRemovedFiles,
@@ -795,6 +821,7 @@ func evaluateGates(
 		MaxPassRateDrop:         maxPassRateDrop,
 		MaxFailedIncrease:       maxFailedIncrease,
 		MaxPartialIncrease:      maxPartialIncrease,
+		MaxWarningIncrease:      maxWarningIncrease,
 		DenyErrorCodes:          denyErrorCodes,
 		MaxNewErrorCodes:        maxNewErrorCodes,
 		MaxErrorCodeRegressions: maxErrorCodeRegressions,
@@ -814,6 +841,10 @@ func evaluateGates(
 	if maxPartial != nil && report.Summary.Partial > *maxPartial {
 		report.Gate.Failures = append(report.Gate.Failures,
 			fmt.Sprintf("partial %d > max_partial %d", report.Summary.Partial, *maxPartial))
+	}
+	if maxWarnings != nil && report.Summary.WarningsTotal > *maxWarnings {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("warnings %d > max_warnings %d", report.Summary.WarningsTotal, *maxWarnings))
 	}
 	if maxNewlyFailed != nil {
 		if report.Baseline == nil {
@@ -872,6 +903,14 @@ func evaluateGates(
 		} else if report.Trend.LatestDelta.DeltaPartial > *maxPartialIncrease {
 			report.Gate.Failures = append(report.Gate.Failures,
 				fmt.Sprintf("partial_increase %d > max_partial_increase %d", report.Trend.LatestDelta.DeltaPartial, *maxPartialIncrease))
+		}
+	}
+	if maxWarningIncrease != nil {
+		if report.Trend == nil || report.Trend.LatestDelta == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_warning_increase gate requires trend latest delta")
+		} else if report.Trend.LatestDelta.DeltaWarnings > *maxWarningIncrease {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("warning_increase %d > max_warning_increase %d", report.Trend.LatestDelta.DeltaWarnings, *maxWarningIncrease))
 		}
 	}
 	for _, code := range denyErrorCodes {
@@ -1125,6 +1164,7 @@ func buildTrend(dir string, limit int, current replayReport) (*replayTrend, erro
 			DeltaPassRate:   last.PassRate - prev.PassRate,
 			DeltaFailed:     last.Failed - prev.Failed,
 			DeltaPartial:    last.Partial - prev.Partial,
+			DeltaWarnings:   last.Warnings - prev.Warnings,
 		}
 	}
 	return out, nil
@@ -1157,6 +1197,7 @@ func reportToTrendPoint(rep replayReport, reportPath string) replayTrendPoint {
 		Success:     rep.Summary.Success,
 		Failed:      rep.Summary.Failed,
 		Partial:     rep.Summary.Partial,
+		Warnings:    rep.Summary.WarningsTotal,
 		PassRate:    rep.Summary.PassRate,
 	}
 }

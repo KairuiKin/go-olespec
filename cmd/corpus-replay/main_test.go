@@ -267,6 +267,33 @@ func TestRunReplayMaxPartialGate(t *testing.T) {
 	}
 }
 
+func TestRunReplayMaxWarningsGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-artifact-size", "1",
+		"-max-warnings", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected max-warnings gate error")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.WarningsTotal == 0 {
+		t.Fatalf("expected warning count > 0, got %d", rep.Summary.WarningsTotal)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
 func TestRunReplayMaxNewlyFailedRequiresBaseline(t *testing.T) {
 	var out bytes.Buffer
 	err := run([]string{"-max-newly-failed", "0"}, &out)
@@ -659,6 +686,9 @@ func TestRunReplayTrendGatesRequireTrendDir(t *testing.T) {
 	if err := run([]string{"-max-partial-increase", "0"}, &out); err == nil {
 		t.Fatal("expected max-partial-increase validation error")
 	}
+	if err := run([]string{"-max-warning-increase", "0"}, &out); err == nil {
+		t.Fatal("expected max-warning-increase validation error")
+	}
 }
 
 func TestRunReplayTrendPartialIncreaseGate(t *testing.T) {
@@ -688,6 +718,37 @@ func TestRunReplayTrendPartialIncreaseGate(t *testing.T) {
 		t.Fatal("expected trend partial-increase gate failure")
 	}
 	if !strings.Contains(err.Error(), "partial_increase") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+}
+
+func TestRunReplayTrendWarningIncreaseGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	writeTrendReport(t, filepath.Join(history, "r1.json"), replayReport{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Options:     replayOptions{RunID: "h1"},
+		Summary:     replaySummary{Processed: 1, Success: 1, Failed: 0, Partial: 0, WarningsTotal: 0, PassRate: 1.0},
+	})
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-trend-dir", history,
+		"-max-artifact-size", "1",
+		"-max-warning-increase", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected trend warning-increase gate failure")
+	}
+	if !strings.Contains(err.Error(), "warning_increase") {
 		t.Fatalf("unexpected gate error: %v", err)
 	}
 }
