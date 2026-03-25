@@ -871,13 +871,42 @@ func (f *File) validateIncrementalStreamWrite(id NodeID, data []byte) error {
 		if len(f.miniFAT) == 0 || entry.StartSector == cfbEndOfChain {
 			return newError(ErrUnsupported, "mini stream chain is unavailable for incremental write", "tx.commit_incremental", node.Path, -1, nil)
 		}
-		if _, ok := f.entries[0]; !ok {
+		miniSectorSize := int64(1 << f.hdr.MiniSectorShift)
+		needMini := ceilDiv(len(data), int(miniSectorSize))
+		miniChain, err := walkFATChain(f.miniFAT, entry.StartSector, f.opt.MaxChainLength)
+		if err != nil {
+			return newError(ErrUnsupported, "mini stream chain is invalid for incremental write", "tx.commit_incremental", node.Path, -1, err)
+		}
+		if len(miniChain) < needMini {
+			return newError(ErrUnsupported, "mini stream chain is shorter than payload sectors", "tx.commit_incremental", node.Path, -1, nil)
+		}
+		root, ok := f.entries[0]
+		if !ok || root.StartSector == cfbEndOfChain {
 			return newError(ErrUnsupported, "root mini stream entry is missing", "tx.commit_incremental", "/", -1, nil)
+		}
+		rootChain, err := walkFATChain(f.fat, root.StartSector, f.opt.MaxChainLength)
+		if err != nil {
+			return newError(ErrUnsupported, "root mini stream chain is invalid for incremental write", "tx.commit_incremental", "/", -1, err)
+		}
+		sectorSize := int64(1 << f.hdr.SectorShift)
+		lastMiniOffset := int64(miniChain[needMini-1])*miniSectorSize + miniSectorSize - 1
+		rootSectorIndex := int(lastMiniOffset / sectorSize)
+		if rootSectorIndex >= len(rootChain) {
+			return newError(ErrUnsupported, "root mini stream chain is shorter than required", "tx.commit_incremental", node.Path, lastMiniOffset, nil)
 		}
 		return nil
 	}
 	if len(f.fat) == 0 || entry.StartSector == cfbEndOfChain {
 		return newError(ErrUnsupported, "fat chain is unavailable for incremental write", "tx.commit_incremental", node.Path, -1, nil)
+	}
+	sectorSize := int64(1 << f.hdr.SectorShift)
+	need := ceilDiv(len(data), int(sectorSize))
+	chain, err := walkFATChain(f.fat, entry.StartSector, f.opt.MaxChainLength)
+	if err != nil {
+		return newError(ErrUnsupported, "stream fat chain is invalid for incremental write", "tx.commit_incremental", node.Path, -1, err)
+	}
+	if len(chain) < need {
+		return newError(ErrUnsupported, "stream fat chain is shorter than payload sectors", "tx.commit_incremental", node.Path, -1, nil)
 	}
 	return nil
 }
