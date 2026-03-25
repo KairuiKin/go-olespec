@@ -136,6 +136,9 @@ type replayGateResult struct {
 	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
 	MaxFailed               *int     `json:"max_failed,omitempty"`
 	MaxNewlyFailed          *int     `json:"max_newly_failed,omitempty"`
+	MaxNewFiles             *int     `json:"max_new_files,omitempty"`
+	MaxRemovedFiles         *int     `json:"max_removed_files,omitempty"`
+	MaxNewlyPartial         *int     `json:"max_newly_partial,omitempty"`
 	MaxPassRateDrop         *float64 `json:"max_pass_rate_drop,omitempty"`
 	MaxFailedIncrease       *int     `json:"max_failed_increase,omitempty"`
 	DenyErrorCodes          []string `json:"deny_error_codes,omitempty"`
@@ -180,6 +183,9 @@ func run(args []string, out io.Writer) error {
 		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
 		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
 		maxNewlyFailed          = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
+		maxNewFiles             = fset.Int("max-new-files", -1, "gate: maximum allowed new files vs baseline, negative disables")
+		maxRemovedFiles         = fset.Int("max-removed-files", -1, "gate: maximum allowed removed files vs baseline, negative disables")
+		maxNewlyPartial         = fset.Int("max-newly-partial", -1, "gate: maximum allowed newly partial files vs baseline, negative disables")
 		maxPassRateDrop         = fset.Float64("max-pass-rate-drop", -1, "gate: maximum allowed pass-rate drop vs latest trend point in [0,1], negative disables")
 		maxFailedIncrease       = fset.Int("max-failed-increase", -1, "gate: maximum allowed failed-files increase vs latest trend point, negative disables")
 		denyErrorCodes          = fset.String("deny-error-codes", "", "gate: comma-separated error codes that must not appear")
@@ -192,6 +198,15 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxNewlyFailed >= 0 && strings.TrimSpace(*baselinePath) == "" {
 		return errors.New("max-newly-failed requires -baseline")
+	}
+	if *maxNewFiles >= 0 && strings.TrimSpace(*baselinePath) == "" {
+		return errors.New("max-new-files requires -baseline")
+	}
+	if *maxRemovedFiles >= 0 && strings.TrimSpace(*baselinePath) == "" {
+		return errors.New("max-removed-files requires -baseline")
+	}
+	if *maxNewlyPartial >= 0 && strings.TrimSpace(*baselinePath) == "" {
+		return errors.New("max-newly-partial requires -baseline")
 	}
 	if *maxNewErrorCodes >= 0 && strings.TrimSpace(*baselinePath) == "" {
 		return errors.New("max-new-error-codes requires -baseline")
@@ -382,6 +397,21 @@ func run(args []string, out io.Writer) error {
 		v := *maxNewlyFailed
 		maxNewlyFailedPtr = &v
 	}
+	var maxNewFilesPtr *int
+	if *maxNewFiles >= 0 {
+		v := *maxNewFiles
+		maxNewFilesPtr = &v
+	}
+	var maxRemovedFilesPtr *int
+	if *maxRemovedFiles >= 0 {
+		v := *maxRemovedFiles
+		maxRemovedFilesPtr = &v
+	}
+	var maxNewlyPartialPtr *int
+	if *maxNewlyPartial >= 0 {
+		v := *maxNewlyPartial
+		maxNewlyPartialPtr = &v
+	}
 	var maxPassRateDropPtr *float64
 	if *maxPassRateDrop >= 0 {
 		v := *maxPassRateDrop
@@ -407,6 +437,9 @@ func run(args []string, out io.Writer) error {
 		minPassRatePtr,
 		maxFailedPtr,
 		maxNewlyFailedPtr,
+		maxNewFilesPtr,
+		maxRemovedFilesPtr,
+		maxNewlyPartialPtr,
 		maxPassRateDropPtr,
 		maxFailedIncreasePtr,
 		denyCodes,
@@ -603,6 +636,9 @@ func evaluateGates(
 	minPassRate *float64,
 	maxFailed *int,
 	maxNewlyFailed *int,
+	maxNewFiles *int,
+	maxRemovedFiles *int,
+	maxNewlyPartial *int,
 	maxPassRateDrop *float64,
 	maxFailedIncrease *int,
 	denyErrorCodes []string,
@@ -614,11 +650,14 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinPassRate:             minPassRate,
 		MaxFailed:               maxFailed,
 		MaxNewlyFailed:          maxNewlyFailed,
+		MaxNewFiles:             maxNewFiles,
+		MaxRemovedFiles:         maxRemovedFiles,
+		MaxNewlyPartial:         maxNewlyPartial,
 		MaxPassRateDrop:         maxPassRateDrop,
 		MaxFailedIncrease:       maxFailedIncrease,
 		DenyErrorCodes:          denyErrorCodes,
@@ -643,6 +682,30 @@ func evaluateGates(
 		} else if report.Baseline.NewlyFailed > *maxNewlyFailed {
 			report.Gate.Failures = append(report.Gate.Failures,
 				fmt.Sprintf("newly_failed %d > max_newly_failed %d", report.Baseline.NewlyFailed, *maxNewlyFailed))
+		}
+	}
+	if maxNewFiles != nil {
+		if report.Baseline == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_new_files gate requires baseline diff")
+		} else if report.Baseline.NewFiles > *maxNewFiles {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("new_files %d > max_new_files %d", report.Baseline.NewFiles, *maxNewFiles))
+		}
+	}
+	if maxRemovedFiles != nil {
+		if report.Baseline == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_removed_files gate requires baseline diff")
+		} else if report.Baseline.RemovedFiles > *maxRemovedFiles {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("removed_files %d > max_removed_files %d", report.Baseline.RemovedFiles, *maxRemovedFiles))
+		}
+	}
+	if maxNewlyPartial != nil {
+		if report.Baseline == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_newly_partial gate requires baseline diff")
+		} else if report.Baseline.NewlyPartial > *maxNewlyPartial {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("newly_partial %d > max_newly_partial %d", report.Baseline.NewlyPartial, *maxNewlyPartial))
 		}
 	}
 	if maxPassRateDrop != nil {

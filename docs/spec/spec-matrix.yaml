@@ -135,6 +135,7 @@ items:
       - "integration/extract_file_to_dir"
       - "integration/corpus_replay_cli"
       - "integration/corpus_replay_baseline_diff_gate"
+      - "integration/corpus_replay_baseline_fileset_gates"
       - "integration/corpus_replay_error_code_gates"
       - "integration/corpus_replay_trend_summary"
       - "integration/corpus_replay_trend_gates"

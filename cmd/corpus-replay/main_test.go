@@ -242,6 +242,121 @@ func TestRunReplayErrorCodeGatesRequireBaseline(t *testing.T) {
 	}
 }
 
+func TestRunReplayBaselineFileSetGates(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.cfb")
+	if err := os.WriteFile(a, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	baselinePath := filepath.Join(root, "baseline.json")
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-output", baselinePath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("baseline run returned error: %v", err)
+	}
+	b := filepath.Join(root, "b.cfb")
+	if err := os.WriteFile(b, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile b returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-baseline", baselinePath,
+		"-max-new-files", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected max-new-files gate failure")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Baseline == nil || rep.Baseline.NewFiles == 0 {
+		t.Fatalf("unexpected baseline new files: %+v", rep.Baseline)
+	}
+}
+
+func TestRunReplayBaselineRemovedFilesGate(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.cfb")
+	b := filepath.Join(root, "b.cfb")
+	if err := os.WriteFile(a, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	if err := os.WriteFile(b, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile b returned error: %v", err)
+	}
+	baselinePath := filepath.Join(root, "baseline.json")
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-output", baselinePath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("baseline run returned error: %v", err)
+	}
+	if err := os.Remove(b); err != nil {
+		t.Fatalf("Remove b returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-baseline", baselinePath,
+		"-max-removed-files", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected max-removed-files gate failure")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Baseline == nil || rep.Baseline.RemovedFiles == 0 {
+		t.Fatalf("unexpected baseline removed files: %+v", rep.Baseline)
+	}
+}
+
+func TestRunReplayBaselineNewlyPartialGate(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.cfb")
+	if err := os.WriteFile(a, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	baselinePath := filepath.Join(root, "baseline.json")
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-output", baselinePath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("baseline run returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-baseline", baselinePath,
+		"-max-artifact-size", "1",
+		"-max-newly-partial", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected max-newly-partial gate failure")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Baseline == nil || rep.Baseline.NewlyPartial == 0 {
+		t.Fatalf("unexpected baseline newly partial: %+v", rep.Baseline)
+	}
+}
+
+func TestRunReplayBaselineFileSetGatesRequireBaseline(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-max-new-files", "0"}, &out); err == nil {
+		t.Fatal("expected max-new-files validation error")
+	}
+	if err := run([]string{"-max-removed-files", "0"}, &out); err == nil {
+		t.Fatal("expected max-removed-files validation error")
+	}
+	if err := run([]string{"-max-newly-partial", "0"}, &out); err == nil {
+		t.Fatal("expected max-newly-partial validation error")
+	}
+}
+
 func TestRunReplayTrendSummary(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
