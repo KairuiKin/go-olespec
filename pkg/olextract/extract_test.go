@@ -47,6 +47,27 @@ func TestExtractFile(t *testing.T) {
 	}
 }
 
+func TestExtractReader(t *testing.T) {
+	buf := buildSampleCFBBytes(t)
+	rep, err := ExtractReader(
+		bytes.NewReader(buf),
+		olecfb.OpenOptions{Mode: olecfb.Strict},
+		olecfb.ExtractOptions{Deduplicate: true},
+	)
+	if err != nil {
+		t.Fatalf("ExtractReader returned error: %v", err)
+	}
+	if rep.Stats.ArtifactsTotal != 1 {
+		t.Fatalf("unexpected artifacts total: %d", rep.Stats.ArtifactsTotal)
+	}
+}
+
+func TestExtractReaderNil(t *testing.T) {
+	if _, err := ExtractReader(nil, olecfb.OpenOptions{}, olecfb.ExtractOptions{}); err == nil {
+		t.Fatal("expected error for nil reader")
+	}
+}
+
 func buildSampleCFBBytes(t *testing.T) []byte {
 	t.Helper()
 	f, err := olecfb.CreateInMemory(olecfb.CreateOptions{})
@@ -72,4 +93,3 @@ func buildSampleCFBBytes(t *testing.T) []byte {
 	}
 	return buf
 }
-
