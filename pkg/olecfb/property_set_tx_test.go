@@ -136,3 +136,83 @@ func TestTxPutSummaryInformation_ExistingInvalidStreamFails(t *testing.T) {
 		t.Fatalf("expected ErrDirCorrupt, got %v", err)
 	}
 }
+
+func TestTxPutSummaryInformation_PreserveOtherSets(t *testing.T) {
+	stream := &oleps.Stream{
+		ByteOrder: 0xFFFE,
+		Sets: []oleps.PropertySet{
+			{
+				FormatID: oleps.FMTIDSummaryInformation,
+				Properties: map[uint32]oleps.Property{
+					oleps.PIDTitle: {
+						ID:    oleps.PIDTitle,
+						Type:  oleps.VTLPWSTR,
+						Value: "Old Title",
+					},
+				},
+				Order: []uint32{oleps.PIDTitle},
+			},
+			{
+				FormatID: oleps.FMTIDDocumentSummaryInformation,
+				Properties: map[uint32]oleps.Property{
+					oleps.PIDAuthor: {
+						ID:    oleps.PIDAuthor,
+						Type:  oleps.VTLPWSTR,
+						Value: "Keep Author",
+					},
+				},
+				Order: []uint32{oleps.PIDAuthor},
+			},
+		},
+	}
+	data, err := oleps.Marshal(stream)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	fileBytes, _ := buildValidV4FileWithNamedStream("\x05SummaryInformation", data)
+	f, err := OpenBytesRW(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytesRW returned error: %v", err)
+	}
+
+	set, err := f.OpenSummaryInformation()
+	if err != nil {
+		t.Fatalf("OpenSummaryInformation returned error: %v", err)
+	}
+	set.SetString(oleps.PIDTitle, "New Title")
+
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if err := tx.PutSummaryInformation(set); err != nil {
+		t.Fatalf("PutSummaryInformation returned error: %v", err)
+	}
+	if _, err := tx.Commit(nil, CommitOptions{}); err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+
+	updated, err := f.OpenPropertySet("/\x05SummaryInformation")
+	if err != nil {
+		t.Fatalf("OpenPropertySet returned error: %v", err)
+	}
+	if len(updated.Sets) != 2 {
+		t.Fatalf("expected 2 sets, got %d", len(updated.Sets))
+	}
+	si, ok := updated.SummaryInformation()
+	if !ok {
+		t.Fatal("summary set missing")
+	}
+	title, ok := si.GetString(oleps.PIDTitle)
+	if !ok || title != "New Title" {
+		t.Fatalf("unexpected title: %q", title)
+	}
+	dsi, ok := updated.DocumentSummaryInformation()
+	if !ok {
+		t.Fatal("document summary set missing")
+	}
+	author, ok := dsi.GetString(oleps.PIDAuthor)
+	if !ok || author != "Keep Author" {
+		t.Fatalf("unexpected author: %q", author)
+	}
+}
