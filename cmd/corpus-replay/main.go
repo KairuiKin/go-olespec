@@ -23,6 +23,7 @@ type replayOptions struct {
 	Mode            string   `json:"mode"`
 	RunID           string   `json:"run_id,omitempty"`
 	BaselineReport  string   `json:"baseline_report,omitempty"`
+	BaselineLatest  bool     `json:"baseline_latest,omitempty"`
 	TrendDir        string   `json:"trend_dir,omitempty"`
 	TrendLimit      int      `json:"trend_limit,omitempty"`
 	SaveTrend       bool     `json:"save_trend,omitempty"`
@@ -167,6 +168,7 @@ func run(args []string, out io.Writer) error {
 		extCSV                  = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
+		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
 		trendDir                = fset.String("trend-dir", "", "directory containing historical replay report JSON files for trend summary")
 		trendLimit              = fset.Int("trend-limit", 20, "max historical points to keep for trend, <=0 means unlimited")
@@ -198,31 +200,40 @@ func run(args []string, out io.Writer) error {
 	if err := fset.Parse(args); err != nil {
 		return err
 	}
-	if *maxNewlyFailed >= 0 && strings.TrimSpace(*baselinePath) == "" {
+	baselinePathTrim := strings.TrimSpace(*baselinePath)
+	trendDirTrim := strings.TrimSpace(*trendDir)
+	if *baselineLatest && baselinePathTrim != "" {
+		return errors.New("baseline-latest cannot be used with -baseline")
+	}
+	if *baselineLatest && trendDirTrim == "" {
+		return errors.New("baseline-latest requires -trend-dir")
+	}
+	hasBaselineInput := baselinePathTrim != "" || *baselineLatest
+	if *maxNewlyFailed >= 0 && !hasBaselineInput {
 		return errors.New("max-newly-failed requires -baseline")
 	}
-	if *maxNewFiles >= 0 && strings.TrimSpace(*baselinePath) == "" {
+	if *maxNewFiles >= 0 && !hasBaselineInput {
 		return errors.New("max-new-files requires -baseline")
 	}
-	if *maxRemovedFiles >= 0 && strings.TrimSpace(*baselinePath) == "" {
+	if *maxRemovedFiles >= 0 && !hasBaselineInput {
 		return errors.New("max-removed-files requires -baseline")
 	}
-	if *maxNewlyPartial >= 0 && strings.TrimSpace(*baselinePath) == "" {
+	if *maxNewlyPartial >= 0 && !hasBaselineInput {
 		return errors.New("max-newly-partial requires -baseline")
 	}
-	if *maxNewErrorCodes >= 0 && strings.TrimSpace(*baselinePath) == "" {
+	if *maxNewErrorCodes >= 0 && !hasBaselineInput {
 		return errors.New("max-new-error-codes requires -baseline")
 	}
-	if *maxErrorCodeRegressions >= 0 && strings.TrimSpace(*baselinePath) == "" {
+	if *maxErrorCodeRegressions >= 0 && !hasBaselineInput {
 		return errors.New("max-error-code-regressions requires -baseline")
 	}
-	if *maxPassRateDrop >= 0 && strings.TrimSpace(*trendDir) == "" {
+	if *maxPassRateDrop >= 0 && trendDirTrim == "" {
 		return errors.New("max-pass-rate-drop requires -trend-dir")
 	}
-	if *maxFailedIncrease >= 0 && strings.TrimSpace(*trendDir) == "" {
+	if *maxFailedIncrease >= 0 && trendDirTrim == "" {
 		return errors.New("max-failed-increase requires -trend-dir")
 	}
-	if *saveTrend && strings.TrimSpace(*trendDir) == "" {
+	if *saveTrend && trendDirTrim == "" {
 		return errors.New("save-trend requires -trend-dir")
 	}
 	if *saveTrendPrune && !*saveTrend {
@@ -278,8 +289,9 @@ func run(args []string, out io.Writer) error {
 		Extensions:      append([]string(nil), extensions...),
 		Mode:            strings.ToLower(*modeStr),
 		RunID:           strings.TrimSpace(*runID),
-		BaselineReport:  strings.TrimSpace(*baselinePath),
-		TrendDir:        strings.TrimSpace(*trendDir),
+		BaselineReport:  baselinePathTrim,
+		BaselineLatest:  *baselineLatest,
+		TrendDir:        trendDirTrim,
 		TrendLimit:      *trendLimit,
 		SaveTrend:       *saveTrend,
 		SaveTrendName:   strings.TrimSpace(*saveTrendName),
@@ -376,15 +388,31 @@ func run(args []string, out io.Writer) error {
 		report.Summary.PassRate = float64(report.Summary.Success) / float64(report.Summary.Processed)
 	}
 	report.Summary.ErrorCodes = collectErrorCodeCounts(report.Files)
-	if strings.TrimSpace(*baselinePath) != "" {
-		baseline, loadErr := loadReplayReport(*baselinePath)
+	resolvedBaselinePath := baselinePathTrim
+	var baseRep replayReport
+	baseLoaded := false
+	if *baselineLatest {
+		latestPath, latestRep, loadErr := loadLatestTrendReport(trendDirTrim)
 		if loadErr != nil {
 			return loadErr
 		}
-		report.Baseline = diffReplayReport(*baselinePath, baseline, report)
+		resolvedBaselinePath = latestPath
+		baseRep = latestRep
+		baseLoaded = true
+	} else if resolvedBaselinePath != "" {
+		loaded, loadErr := loadReplayReport(resolvedBaselinePath)
+		if loadErr != nil {
+			return loadErr
+		}
+		baseRep = loaded
+		baseLoaded = true
 	}
-	if strings.TrimSpace(*trendDir) != "" {
-		trend, trendErr := buildTrend(strings.TrimSpace(*trendDir), *trendLimit, report)
+	if baseLoaded {
+		report.Baseline = diffReplayReport(resolvedBaselinePath, baseRep, report)
+		report.Options.BaselineReport = resolvedBaselinePath
+	}
+	if trendDirTrim != "" {
+		trend, trendErr := buildTrend(trendDirTrim, *trendLimit, report)
 		if trendErr != nil {
 			return trendErr
 		}
@@ -470,12 +498,12 @@ func run(args []string, out io.Writer) error {
 			return err
 		}
 		if *saveTrend {
-			savedPath, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf)
+			savedPath, saveErr := saveTrendReport(trendDirTrim, strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf)
 			if saveErr != nil {
 				return saveErr
 			}
 			if *saveTrendPrune {
-				if _, pruneErr := pruneTrendReports(strings.TrimSpace(*trendDir), *trendLimit, savedPath); pruneErr != nil {
+				if _, pruneErr := pruneTrendReports(trendDirTrim, *trendLimit, savedPath); pruneErr != nil {
 					return pruneErr
 				}
 			}
@@ -494,17 +522,70 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 	if *saveTrend {
-		savedPath, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf)
+		savedPath, saveErr := saveTrendReport(trendDirTrim, strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf)
 		if saveErr != nil {
 			return saveErr
 		}
 		if *saveTrendPrune {
-			if _, pruneErr := pruneTrendReports(strings.TrimSpace(*trendDir), *trendLimit, savedPath); pruneErr != nil {
+			if _, pruneErr := pruneTrendReports(trendDirTrim, *trendLimit, savedPath); pruneErr != nil {
 				return pruneErr
 			}
 		}
 	}
 	return gateErr
+}
+
+func loadLatestTrendReport(dir string) (string, replayReport, error) {
+	absDir, err := filepath.Abs(strings.TrimSpace(dir))
+	if err != nil {
+		return "", replayReport{}, err
+	}
+	info, statErr := os.Stat(absDir)
+	if statErr != nil {
+		return "", replayReport{}, statErr
+	}
+	if !info.IsDir() {
+		return "", replayReport{}, fmt.Errorf("trend-dir is not a directory: %s", absDir)
+	}
+	found := false
+	latestPath := ""
+	var latestReport replayReport
+	var latestWhen time.Time
+	err = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) != ".json" {
+			return nil
+		}
+		rep, loadErr := loadReplayReport(path)
+		if loadErr != nil {
+			return nil
+		}
+		when := parseReportTime(rep.GeneratedAt)
+		if when.IsZero() {
+			if fi, fiErr := os.Stat(path); fiErr == nil {
+				when = fi.ModTime()
+			}
+		}
+		if !found || when.After(latestWhen) || (when.Equal(latestWhen) && path > latestPath) {
+			found = true
+			latestWhen = when
+			latestPath = path
+			latestReport = rep
+		}
+		return nil
+	})
+	if err != nil {
+		return "", replayReport{}, err
+	}
+	if !found {
+		return "", replayReport{}, fmt.Errorf("no replay report found in trend-dir: %s", absDir)
+	}
+	return latestPath, latestReport, nil
 }
 
 func loadReplayReport(path string) (replayReport, error) {

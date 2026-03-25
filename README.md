@@ -45,6 +45,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -trend-limit 50 -save-trend -save-trend-prune
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -baseline-latest -max-newly-failed 0
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)

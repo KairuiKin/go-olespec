@@ -119,6 +119,47 @@ func TestRunReplayBaselineDiffAndNewlyFailedGate(t *testing.T) {
 	}
 }
 
+func TestRunReplayBaselineLatest(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.cfb")
+	if err := os.WriteFile(target, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile target returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	baselinePath := filepath.Join(history, "base.json")
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-output", baselinePath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("baseline run returned error: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("bad"), 0o644); err != nil {
+		t.Fatalf("overwrite target returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-trend-dir", history,
+		"-baseline-latest",
+		"-max-newly-failed", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected gate failure")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Baseline == nil {
+		t.Fatal("expected baseline diff")
+	}
+	if rep.Options.BaselineReport == "" {
+		t.Fatal("expected resolved baseline path")
+	}
+}
+
 func TestRunReplayMaxFailedGate(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
@@ -149,6 +190,31 @@ func TestRunReplayMaxNewlyFailedRequiresBaseline(t *testing.T) {
 	err := run([]string{"-max-newly-failed", "0"}, &out)
 	if err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestRunReplayBaselineLatestValidation(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-baseline-latest"}, &out); err == nil {
+		t.Fatal("expected baseline-latest validation error without trend-dir")
+	}
+	if err := run([]string{"-baseline-latest", "-baseline", "a.json", "-trend-dir", "."}, &out); err == nil {
+		t.Fatal("expected baseline-latest conflict validation error")
+	}
+}
+
+func TestRunReplayBaselineLatestNoReports(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-trend-dir", history, "-baseline-latest"}, &out); err == nil {
+		t.Fatal("expected baseline-latest no report error")
 	}
 }
 
