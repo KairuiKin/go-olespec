@@ -87,6 +87,13 @@ type StreamReader interface {
 }
 ```
 
+`CommitResult` 字段：
+
+- `BytesWritten`: 本次提交写入字节数
+- `NewSize`: 提交后容器大小
+- `BackendKind`: `mem` / `file`
+- `StrategyUsed`: 实际使用的提交策略（`FullRewrite` 或 `Incremental`）
+
 ## 6. Error Contract
 
 - 所有对外错误必须是 `*OLEError` 或可 `errors.As` 到 `*OLEError`。

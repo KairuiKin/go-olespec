@@ -73,6 +73,7 @@ type CommitResult struct {
 	BytesWritten int64
 	NewSize      int64
 	BackendKind  string
+	StrategyUsed CommitStrategy
 }
 
 type StreamReader interface {

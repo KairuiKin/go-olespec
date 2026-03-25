@@ -265,8 +265,12 @@ func TestTxCommitLargeStreamWithIncrementalFallback(t *testing.T) {
 	if err := tx.PutStream("/Big", bytes.NewReader(payload), int64(len(payload))); err != nil {
 		t.Fatalf("PutStream returned error: %v", err)
 	}
-	if _, err := tx.Commit(nil, CommitOptions{Strategy: Incremental}); err != nil {
+	res, err := tx.Commit(nil, CommitOptions{Strategy: Incremental})
+	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
+	}
+	if res.StrategyUsed != FullRewrite {
+		t.Fatalf("expected fallback strategy FullRewrite, got %v", res.StrategyUsed)
 	}
 
 	snap, err := f.SnapshotBytes()
@@ -376,6 +380,9 @@ func TestTxCommitIncrementalInPlaceUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
 	}
+	if res.StrategyUsed != Incremental {
+		t.Fatalf("expected incremental strategy, got %v", res.StrategyUsed)
+	}
 	if res.BytesWritten != int64(len(payload)) {
 		t.Fatalf("unexpected bytes written: got %d want %d", res.BytesWritten, len(payload))
 	}
@@ -426,6 +433,9 @@ func TestTxCommitIncrementalMiniStreamUpdate(t *testing.T) {
 	res, err := tx.Commit(nil, CommitOptions{Strategy: Incremental})
 	if err != nil {
 		t.Fatalf("Commit returned error: %v", err)
+	}
+	if res.StrategyUsed != Incremental {
+		t.Fatalf("expected incremental strategy, got %v", res.StrategyUsed)
 	}
 	if res.BytesWritten != int64(len(payload)) {
 		t.Fatalf("unexpected bytes written: got %d want %d", res.BytesWritten, len(payload))

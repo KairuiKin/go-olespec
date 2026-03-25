@@ -755,6 +755,7 @@ func (tx *Tx) Commit(ctx context.Context, opt CommitOptions) (*CommitResult, err
 		BytesWritten: size,
 		NewSize:      size,
 		BackendKind:  backendKind(tx.file.rb),
+		StrategyUsed: FullRewrite,
 	}, nil
 }
 
@@ -837,6 +838,7 @@ func (tx *Tx) commitIncremental(ctx context.Context, opt CommitOptions) (*Commit
 		BytesWritten: bytesWritten,
 		NewSize:      size,
 		BackendKind:  backendKind(tx.file.rb),
+		StrategyUsed: Incremental,
 	}, nil
 }
 
