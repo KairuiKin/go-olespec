@@ -113,6 +113,9 @@ items:
     tests:
       - "integration/write_artifacts"
       - "integration/write_artifacts_conflict"
+      - "integration/write_artifacts_tree_layout"
+      - "integration/write_artifacts_manifest"
+      - "integration/write_artifacts_manifest_conflict"
       - "integration/extract_file_to_dir"
 
   - id: PERF-001

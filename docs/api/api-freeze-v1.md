@@ -61,6 +61,10 @@ func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.O
 - 输出采用确定性平铺文件名（`%06d_<sanitized-path>.<ext>`）。
 - `WriteArtifacts` 仅写 `Artifact.Raw` 非空的条目；空 `Raw` 条目计入 `Skipped`。
 - `ExtractFileToDir` 强制开启 `IncludeRaw=true` 后再执行提取与写盘。
+- `WriteOptions.Layout` 支持：
+  - `flat`（默认）：平铺文件
+  - `tree`：按 artifact 路径拆目录（`!` 转为 `_ole_` 目录层）
+- `WriteOptions.WriteManifest=true` 时额外写出 `manifest.json`（可用 `ManifestName` 自定义文件名）。
 
 `oleds` 基础解析 API：
 

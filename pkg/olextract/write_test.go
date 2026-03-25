@@ -2,6 +2,7 @@ package olextract
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,6 +78,94 @@ func TestWriteArtifactsConflict(t *testing.T) {
 	}
 	if _, err := WriteArtifacts(rep, outDir, WriteOptions{}); err == nil {
 		t.Fatal("expected conflict on second write")
+	} else if !olecfb.IsCode(err, olecfb.ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestWriteArtifactsTreeLayoutAndManifest(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{
+				ID:     "a1",
+				Path:   "/Docs/A",
+				Kind:   olecfb.ArtifactStream,
+				Raw:    []byte("aaa"),
+				Size:   3,
+				SHA256: "h1",
+			},
+			{
+				ID:     "a2",
+				Path:   "/Embedded!/Blob",
+				Kind:   olecfb.ArtifactOLEFile,
+				Raw:    []byte("bbb"),
+				Size:   3,
+				SHA256: "h2",
+			},
+		},
+	}
+	outDir := t.TempDir()
+	res, err := WriteArtifacts(rep, outDir, WriteOptions{
+		Layout:        WriteLayoutTree,
+		WriteManifest: true,
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if res.FilesWritten != 2 {
+		t.Fatalf("unexpected files written: %d", res.FilesWritten)
+	}
+	if res.ManifestPath == "" {
+		t.Fatal("expected manifest path")
+	}
+	for _, f := range res.Files {
+		if _, err := os.Stat(f.FilePath); err != nil {
+			t.Fatalf("written file missing: %s", f.FilePath)
+		}
+	}
+	mf, err := os.ReadFile(res.ManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile manifest returned error: %v", err)
+	}
+	var parsed struct {
+		Files []struct {
+			ArtifactID string `json:"artifact_id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(mf, &parsed); err != nil {
+		t.Fatalf("Unmarshal manifest returned error: %v", err)
+	}
+	if len(parsed.Files) != 2 {
+		t.Fatalf("unexpected manifest files count: %d", len(parsed.Files))
+	}
+}
+
+func TestWriteArtifactsInvalidLayout(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Raw: []byte("a"), Kind: olecfb.ArtifactStream},
+		},
+	}
+	if _, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{Layout: WriteLayout("bad")}); err == nil {
+		t.Fatal("expected invalid layout error")
+	} else if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestWriteArtifactsManifestConflict(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream}, // no raw: only manifest output.
+		},
+	}
+	outDir := t.TempDir()
+	opt := WriteOptions{WriteManifest: true}
+	if _, err := WriteArtifacts(rep, outDir, opt); err != nil {
+		t.Fatalf("first WriteArtifacts returned error: %v", err)
+	}
+	if _, err := WriteArtifacts(rep, outDir, opt); err == nil {
+		t.Fatal("expected manifest conflict")
 	} else if !olecfb.IsCode(err, olecfb.ErrConflict) {
 		t.Fatalf("expected ErrConflict, got %v", err)
 	}
