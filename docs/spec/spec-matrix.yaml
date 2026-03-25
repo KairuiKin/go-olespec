@@ -105,6 +105,16 @@ items:
       - "integration/extract_deterministic"
       - "integration/extract_unwrap_ole10native"
 
+  - id: EXTRACT-IO-001
+    section: "Extraction write-out"
+    level: SHOULD
+    requirement: "Allow writing extracted raw artifacts to filesystem with deterministic naming"
+    implementation: "pkg/olextract"
+    tests:
+      - "integration/write_artifacts"
+      - "integration/write_artifacts_conflict"
+      - "integration/extract_file_to_dir"
+
   - id: PERF-001
     section: "Performance baseline"
     level: SHOULD

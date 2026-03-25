@@ -44,12 +44,20 @@ func ExtractBackend(rb storage.ReadBackend, openOpt olecfb.OpenOptions, extractO
 func ExtractBytes(buf []byte, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
 func ExtractFile(path string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
 func ExtractReader(r io.Reader, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
+func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOptions) (WriteResult, error)
+func ExtractFileToDir(path, dstDir string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions, writeOpt WriteOptions) (*olecfb.ExtractReport, WriteResult, error)
 ```
 
 `ExtractBackend` 语义：
 
 - 始终在返回前关闭 `ReadBackend`。
 - `rb=nil` 返回 `INVALID_ARGUMENT`。
+
+`WriteArtifacts`/`ExtractFileToDir` 语义：
+
+- 输出采用确定性平铺文件名（`%06d_<sanitized-path>.<ext>`）。
+- `WriteArtifacts` 仅写 `Artifact.Raw` 非空的条目；空 `Raw` 条目计入 `Skipped`。
+- `ExtractFileToDir` 强制开启 `IncludeRaw=true` 后再执行提取与写盘。
 
 `oleds` 基础解析 API：
 
