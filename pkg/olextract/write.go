@@ -313,7 +313,31 @@ func sanitizeName(v string) string {
 		}
 		b.WriteByte('_')
 	}
-	return strings.Trim(b.String(), "_")
+	s := strings.Trim(b.String(), "_")
+	s = strings.Trim(s, ". ")
+	if s == "" {
+		return s
+	}
+	if isWindowsReservedName(s) {
+		return "_" + s
+	}
+	return s
+}
+
+func isWindowsReservedName(v string) bool {
+	up := strings.ToUpper(v)
+	base := up
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	switch base {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	default:
+		return false
+	}
 }
 
 type writeManifestData struct {

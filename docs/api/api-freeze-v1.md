@@ -67,6 +67,7 @@ func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.O
 - `WriteOptions.WriteManifest=true` 时额外写出 `manifest.json`（可用 `ManifestName` 自定义文件名）。
 - 对 `ArtifactOleObj`/`ArtifactStream` 且存在 `OLEFileName` 的条目，写盘后缀优先使用 `OLEFileName` 的安全扩展名（如 `.txt`）。
 - `WriteResult.Files[*].RelativePath` 和 manifest 的 `relative_path` 为相对 `dstDir` 的稳定路径映射。
+- 路径段会规避 Windows 保留名（如 `CON`/`PRN`/`AUX`/`NUL`/`COM1`/`LPT1`）以保证跨平台可写性。
 
 `oleds` 基础解析 API：
 

@@ -205,6 +205,29 @@ func TestWriteArtifactsUsesOleFileNameExtension(t *testing.T) {
 	}
 }
 
+func TestWriteArtifactsTreeLayoutAvoidsReservedWindowsNames(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{
+				Path: "/CON/A",
+				Kind: olecfb.ArtifactStream,
+				Raw:  []byte("abc"),
+			},
+		},
+	}
+	res, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{Layout: WriteLayoutTree})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("unexpected files count: %d", len(res.Files))
+	}
+	rel := strings.ToUpper(filepath.ToSlash(res.Files[0].RelativePath))
+	if strings.HasPrefix(rel, "CON/") {
+		t.Fatalf("reserved path segment should be rewritten, got %s", rel)
+	}
+}
+
 func TestExtractFileToDir(t *testing.T) {
 	buf := buildSampleCFBBytes(t)
 	src := filepath.Join(t.TempDir(), "sample.cfb")
