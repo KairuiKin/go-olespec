@@ -408,3 +408,60 @@ func TestTxCommitIncrementalInPlaceUpdate(t *testing.T) {
 		t.Fatalf("unexpected tail byte: 0x%02X", tail[0])
 	}
 }
+
+func TestTxCommitIncrementalMiniStreamUpdate(t *testing.T) {
+	base, oldPayload := buildValidFileWithMiniStream()
+	f, err := OpenBytesRW(base, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytesRW returned error: %v", err)
+	}
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	payload := bytes.Repeat([]byte{0x4D}, len(oldPayload))
+	if err := tx.PutStream("/Small", bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatalf("PutStream returned error: %v", err)
+	}
+	res, err := tx.Commit(nil, CommitOptions{Strategy: Incremental})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if res.BytesWritten != int64(len(payload)) {
+		t.Fatalf("unexpected bytes written: got %d want %d", res.BytesWritten, len(payload))
+	}
+
+	sr, err := f.OpenStream("/Small")
+	if err != nil {
+		t.Fatalf("OpenStream returned error: %v", err)
+	}
+	defer sr.Close()
+	got := make([]byte, len(payload))
+	if _, err := io.ReadFull(sr, got); err != nil {
+		t.Fatalf("ReadFull returned error: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("unexpected mini stream payload after incremental commit")
+	}
+
+	snap, err := f.SnapshotBytes()
+	if err != nil {
+		t.Fatalf("SnapshotBytes returned error: %v", err)
+	}
+	reopened, err := OpenBytes(snap, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	sr2, err := reopened.OpenStream("/Small")
+	if err != nil {
+		t.Fatalf("OpenStream(reopened) returned error: %v", err)
+	}
+	defer sr2.Close()
+	got2 := make([]byte, len(payload))
+	if _, err := io.ReadFull(sr2, got2); err != nil {
+		t.Fatalf("ReadFull(reopened) returned error: %v", err)
+	}
+	if !bytes.Equal(got2, payload) {
+		t.Fatal("unexpected mini stream payload after reopen")
+	}
+}
