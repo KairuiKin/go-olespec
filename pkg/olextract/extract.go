@@ -38,7 +38,13 @@ func ExtractReader(r io.Reader, openOpt olecfb.OpenOptions, extractOpt olecfb.Ex
 	}
 	buf, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return nil, &olecfb.OLEError{
+			Code:    olecfb.ErrUnsupported,
+			Message: "read input failed",
+			Op:      "olextract.extract_reader",
+			Offset:  -1,
+			Cause:   err,
+		}
 	}
 	return ExtractBytes(buf, openOpt, extractOpt)
 }

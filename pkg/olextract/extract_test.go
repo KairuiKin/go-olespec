@@ -2,6 +2,7 @@ package olextract
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,6 +71,14 @@ func TestExtractReaderNil(t *testing.T) {
 	}
 }
 
+func TestExtractReaderReadFailure(t *testing.T) {
+	if _, err := ExtractReader(failReader{}, olecfb.OpenOptions{}, olecfb.ExtractOptions{}); err == nil {
+		t.Fatal("expected read failure")
+	} else if !olecfb.IsCode(err, olecfb.ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported, got %v", err)
+	}
+}
+
 func buildSampleCFBBytes(t *testing.T) []byte {
 	t.Helper()
 	f, err := olecfb.CreateInMemory(olecfb.CreateOptions{})
@@ -94,4 +103,10 @@ func buildSampleCFBBytes(t *testing.T) []byte {
 		t.Fatalf("SnapshotBytes returned error: %v", err)
 	}
 	return buf
+}
+
+type failReader struct{}
+
+func (failReader) Read(_ []byte) (int, error) {
+	return 0, errors.New("boom")
 }
