@@ -65,6 +65,8 @@ func TestExtractReader(t *testing.T) {
 func TestExtractReaderNil(t *testing.T) {
 	if _, err := ExtractReader(nil, olecfb.OpenOptions{}, olecfb.ExtractOptions{}); err == nil {
 		t.Fatal("expected error for nil reader")
+	} else if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
 	}
 }
 

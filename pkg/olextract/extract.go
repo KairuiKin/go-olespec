@@ -1,7 +1,6 @@
 package olextract
 
 import (
-	"errors"
 	"io"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
@@ -30,7 +29,12 @@ func ExtractFile(path string, openOpt olecfb.OpenOptions, extractOpt olecfb.Extr
 // ExtractReader reads the entire input and runs extraction with the provided options.
 func ExtractReader(r io.Reader, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error) {
 	if r == nil {
-		return nil, errors.New("reader is nil")
+		return nil, &olecfb.OLEError{
+			Code:    olecfb.ErrInvalidArgument,
+			Message: "reader is nil",
+			Op:      "olextract.extract_reader",
+			Offset:  -1,
+		}
 	}
 	buf, err := io.ReadAll(r)
 	if err != nil {
