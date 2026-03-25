@@ -3,12 +3,14 @@ package olextract
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
+	"github.com/KairuiKin/go-olespec/pkg/olecfb/storage"
 )
 
 type WriteOptions struct {
@@ -113,6 +115,51 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 func ExtractFileToDir(path, dstDir string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions, writeOpt WriteOptions) (*olecfb.ExtractReport, WriteResult, error) {
 	extractOpt.IncludeRaw = true
 	rep, err := ExtractFile(path, openOpt, extractOpt)
+	if err != nil {
+		return nil, WriteResult{}, err
+	}
+	res, err := WriteArtifacts(rep, dstDir, writeOpt)
+	if err != nil {
+		return rep, WriteResult{}, err
+	}
+	return rep, res, nil
+}
+
+// ExtractBytesToDir extracts artifacts from a buffer and writes raw payloads to dstDir.
+// It always enables IncludeRaw for extraction.
+func ExtractBytesToDir(buf []byte, dstDir string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions, writeOpt WriteOptions) (*olecfb.ExtractReport, WriteResult, error) {
+	extractOpt.IncludeRaw = true
+	rep, err := ExtractBytes(buf, openOpt, extractOpt)
+	if err != nil {
+		return nil, WriteResult{}, err
+	}
+	res, err := WriteArtifacts(rep, dstDir, writeOpt)
+	if err != nil {
+		return rep, WriteResult{}, err
+	}
+	return rep, res, nil
+}
+
+// ExtractReaderToDir extracts artifacts from a reader and writes raw payloads to dstDir.
+// It always enables IncludeRaw for extraction.
+func ExtractReaderToDir(r io.Reader, dstDir string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions, writeOpt WriteOptions) (*olecfb.ExtractReport, WriteResult, error) {
+	extractOpt.IncludeRaw = true
+	rep, err := ExtractReader(r, openOpt, extractOpt)
+	if err != nil {
+		return nil, WriteResult{}, err
+	}
+	res, err := WriteArtifacts(rep, dstDir, writeOpt)
+	if err != nil {
+		return rep, WriteResult{}, err
+	}
+	return rep, res, nil
+}
+
+// ExtractBackendToDir extracts artifacts from a backend and writes raw payloads to dstDir.
+// It always enables IncludeRaw for extraction.
+func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions, writeOpt WriteOptions) (*olecfb.ExtractReport, WriteResult, error) {
+	extractOpt.IncludeRaw = true
+	rep, err := ExtractBackend(rb, openOpt, extractOpt)
 	if err != nil {
 		return nil, WriteResult{}, err
 	}

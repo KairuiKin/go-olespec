@@ -1,6 +1,7 @@
 package olextract
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,5 +107,56 @@ func TestExtractFileToDir(t *testing.T) {
 	}
 	if _, err := os.Stat(writeRes.Files[0].FilePath); err != nil {
 		t.Fatalf("expected output file: %v", err)
+	}
+}
+
+func TestExtractBytesToDir(t *testing.T) {
+	buf := buildSampleCFBBytes(t)
+	rep, writeRes, err := ExtractBytesToDir(
+		buf,
+		t.TempDir(),
+		olecfb.OpenOptions{Mode: olecfb.Strict},
+		olecfb.ExtractOptions{Deduplicate: true, IncludeRaw: false},
+		WriteOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ExtractBytesToDir returned error: %v", err)
+	}
+	if rep.Stats.ArtifactsTotal != 1 || writeRes.FilesWritten != 1 {
+		t.Fatalf("unexpected result: artifacts=%d files=%d", rep.Stats.ArtifactsTotal, writeRes.FilesWritten)
+	}
+}
+
+func TestExtractReaderToDir(t *testing.T) {
+	buf := buildSampleCFBBytes(t)
+	rep, writeRes, err := ExtractReaderToDir(
+		bytes.NewReader(buf),
+		t.TempDir(),
+		olecfb.OpenOptions{Mode: olecfb.Strict},
+		olecfb.ExtractOptions{Deduplicate: true},
+		WriteOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ExtractReaderToDir returned error: %v", err)
+	}
+	if rep.Stats.ArtifactsTotal != 1 || writeRes.FilesWritten != 1 {
+		t.Fatalf("unexpected result: artifacts=%d files=%d", rep.Stats.ArtifactsTotal, writeRes.FilesWritten)
+	}
+}
+
+func TestExtractBackendToDir(t *testing.T) {
+	buf := buildSampleCFBBytes(t)
+	rep, writeRes, err := ExtractBackendToDir(
+		&testReadBackend{buf: buf},
+		t.TempDir(),
+		olecfb.OpenOptions{Mode: olecfb.Strict},
+		olecfb.ExtractOptions{Deduplicate: true},
+		WriteOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ExtractBackendToDir returned error: %v", err)
+	}
+	if rep.Stats.ArtifactsTotal != 1 || writeRes.FilesWritten != 1 {
+		t.Fatalf("unexpected result: artifacts=%d files=%d", rep.Stats.ArtifactsTotal, writeRes.FilesWritten)
 	}
 }
