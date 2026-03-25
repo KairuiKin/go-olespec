@@ -123,3 +123,28 @@ func TestTxPutDocumentSummaryInformation(t *testing.T) {
 		t.Fatalf("unexpected author after convenience writeback: %q", author)
 	}
 }
+
+func TestTxPutSummaryInformation_ExistingInvalidStreamFails(t *testing.T) {
+	fileBytes, _ := buildValidV4FileWithNamedStream("\x05SummaryInformation", []byte("not-a-property-set"))
+	f, err := OpenBytesRW(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytesRW returned error: %v", err)
+	}
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	set := &oleps.PropertySet{
+		Properties: map[uint32]oleps.Property{
+			oleps.PIDTitle: {ID: oleps.PIDTitle, Type: oleps.VTLPWSTR, Value: "X"},
+		},
+		Order: []uint32{oleps.PIDTitle},
+	}
+	err = tx.PutSummaryInformation(set)
+	if err == nil {
+		t.Fatal("expected parse error for existing invalid property stream")
+	}
+	if !IsCode(err, ErrDirCorrupt) {
+		t.Fatalf("expected ErrDirCorrupt, got %v", err)
+	}
+}

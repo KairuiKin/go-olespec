@@ -45,7 +45,11 @@ func (tx *Tx) putNamedPropertySet(paths []string, formatID oleps.GUID, set *olep
 	}
 	target := paths[0]
 	for _, p := range paths {
-		if _, _, ok := tx.findNodeByPath(p); ok {
+		_, n, ok := tx.findNodeByPath(p)
+		if ok {
+			if !n.IsStream() {
+				return newError(ErrConflict, "target path exists and is not a stream", "property.put_named", p, -1, nil)
+			}
 			target = p
 			break
 		}
@@ -54,11 +58,14 @@ func (tx *Tx) putNamedPropertySet(paths []string, formatID oleps.GUID, set *olep
 	stream := &oleps.Stream{ByteOrder: 0xFFFE}
 	if id, node, ok := tx.findNodeByPath(target); ok && node.IsStream() {
 		data, err := tx.loadStreamData(id, node.Size)
-		if err == nil {
-			if parsed, parseErr := oleps.Parse(data); parseErr == nil {
-				stream = parsed
-			}
+		if err != nil {
+			return newError(ErrBadFATChain, "failed to read existing property set stream", "property.put_named", target, -1, err)
 		}
+		parsed, parseErr := oleps.Parse(data)
+		if parseErr != nil {
+			return newError(ErrDirCorrupt, "failed to parse existing property set stream", "property.put_named", target, -1, parseErr)
+		}
+		stream = parsed
 	}
 	ps := *set
 	ps.FormatID = formatID
