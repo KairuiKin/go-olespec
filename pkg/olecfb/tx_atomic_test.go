@@ -63,6 +63,41 @@ func TestTxCommitFailureDoesNotPolluteState(t *testing.T) {
 	}
 }
 
+func TestTxCommitIncrementalFallbackFailureDoesNotPolluteState(t *testing.T) {
+	base := buildAtomicTwoStreamSeedBytes(t)
+	backend := &failingWriteBackend{
+		buf: append([]byte(nil), base...),
+		err: errors.New("forced write failure"),
+	}
+	f, err := OpenReadWrite(backend, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenReadWrite returned error: %v", err)
+	}
+
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if err := tx.PutStream("/A", bytes.NewReader([]byte("aaaa")), 4); err != nil {
+		t.Fatalf("PutStream /A returned error: %v", err)
+	}
+	if err := tx.PutStream("/B", bytes.NewReader([]byte("bbbb")), 4); err != nil {
+		t.Fatalf("PutStream /B returned error: %v", err)
+	}
+	if _, err := tx.Commit(nil, CommitOptions{Strategy: Incremental}); err == nil {
+		t.Fatal("expected commit error")
+	} else if !IsCode(err, ErrCommitFailed) {
+		t.Fatalf("expected ErrCommitFailed, got %v", err)
+	}
+
+	assertAtomicStreamEquals(t, f, "/A", "1111")
+	assertAtomicStreamEquals(t, f, "/B", "2222")
+
+	if _, err := f.Begin(TxOptions{}); err != nil {
+		t.Fatalf("Begin after failed fallback commit should succeed: %v", err)
+	}
+}
+
 func buildAtomicSeedBytes(t *testing.T) []byte {
 	t.Helper()
 	f, err := CreateInMemory(CreateOptions{})
@@ -84,6 +119,48 @@ func buildAtomicSeedBytes(t *testing.T) []byte {
 		t.Fatalf("SnapshotBytes returned error: %v", err)
 	}
 	return buf
+}
+
+func buildAtomicTwoStreamSeedBytes(t *testing.T) []byte {
+	t.Helper()
+	f, err := CreateInMemory(CreateOptions{})
+	if err != nil {
+		t.Fatalf("CreateInMemory returned error: %v", err)
+	}
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if err := tx.PutStream("/A", bytes.NewReader([]byte("1111")), 4); err != nil {
+		t.Fatalf("PutStream /A returned error: %v", err)
+	}
+	if err := tx.PutStream("/B", bytes.NewReader([]byte("2222")), 4); err != nil {
+		t.Fatalf("PutStream /B returned error: %v", err)
+	}
+	if _, err := tx.Commit(nil, CommitOptions{}); err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	buf, err := f.SnapshotBytes()
+	if err != nil {
+		t.Fatalf("SnapshotBytes returned error: %v", err)
+	}
+	return buf
+}
+
+func assertAtomicStreamEquals(t *testing.T, f *File, path, want string) {
+	t.Helper()
+	sr, err := f.OpenStream(path)
+	if err != nil {
+		t.Fatalf("OpenStream(%s) returned error: %v", path, err)
+	}
+	defer sr.Close()
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(sr, got); err != nil {
+		t.Fatalf("ReadFull(%s) returned error: %v", path, err)
+	}
+	if string(got) != want {
+		t.Fatalf("unexpected payload for %s: got %q want %q", path, string(got), want)
+	}
 }
 
 type failingWriteBackend struct {
@@ -114,4 +191,3 @@ func (b *failingWriteBackend) WriteAt(p []byte, off int64) (int, error) {
 }
 
 func (b *failingWriteBackend) Truncate(size int64) error { return nil }
-
