@@ -162,6 +162,12 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 	if isOLE {
 		artifact.Kind = ArtifactOLEFile
 	}
+	if w.opt.DetectImages {
+		if media, ok := detectImageMedia(head); ok {
+			artifact.Kind = ArtifactImage
+			artifact.MediaType = media
+		}
+	}
 	if w.opt.DetectOLEDS {
 		d := oleds.Detect(n.Path, head)
 		switch d.Kind {
@@ -324,4 +330,33 @@ func asOLEError(err error) *OLEError {
 		Message: err.Error(),
 		Offset:  -1,
 	}
+}
+
+func detectImageMedia(head []byte) (string, bool) {
+	if len(head) >= 8 &&
+		head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47 &&
+		head[4] == 0x0D && head[5] == 0x0A && head[6] == 0x1A && head[7] == 0x0A {
+		return "image/png", true
+	}
+	if len(head) >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF {
+		return "image/jpeg", true
+	}
+	if len(head) >= 6 {
+		if string(head[:6]) == "GIF87a" || string(head[:6]) == "GIF89a" {
+			return "image/gif", true
+		}
+	}
+	if len(head) >= 2 && head[0] == 0x42 && head[1] == 0x4D {
+		return "image/bmp", true
+	}
+	if len(head) >= 4 {
+		if (head[0] == 0x49 && head[1] == 0x49 && head[2] == 0x2A && head[3] == 0x00) ||
+			(head[0] == 0x4D && head[1] == 0x4D && head[2] == 0x00 && head[3] == 0x2A) {
+			return "image/tiff", true
+		}
+	}
+	if len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP" {
+		return "image/webp", true
+	}
+	return "", false
 }

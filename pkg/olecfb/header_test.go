@@ -279,6 +279,29 @@ func TestExtract_DetectOLEDS(t *testing.T) {
 	}
 }
 
+func TestExtract_DetectImages(t *testing.T) {
+	pngPrefix := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	fileBytes, _ := buildValidV4FileWithNamedStream("Image1", pngPrefix)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{DetectImages: true})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	if len(rep.Artifacts) != 1 {
+		t.Fatalf("unexpected artifact count: %d", len(rep.Artifacts))
+	}
+	a := rep.Artifacts[0]
+	if a.Kind != ArtifactImage {
+		t.Fatalf("expected image artifact, got %s", a.Kind)
+	}
+	if a.MediaType != "image/png" {
+		t.Fatalf("unexpected media type: %q", a.MediaType)
+	}
+}
+
 func TestExtract_RecursiveNestedOLE(t *testing.T) {
 	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
 	outerBytes := buildValidV4FileWithBigNamedStream("Embedded", innerBytes)

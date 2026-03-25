@@ -24,6 +24,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - Basic extraction report with stream hashing (SHA-256)
 - Recursive extraction for nested OLE streams with `ParentID/Children` graph
 - OLE object detection in extraction (`DetectOLEDS`)
+- Basic image signature detection in extraction (`DetectImages`)
 - Property set parsing:
   - parse property set stream header and sets
   - read SummaryInformation common fields (string/int/time basic types)
