@@ -3,6 +3,7 @@ package olextract
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,6 +243,63 @@ func TestWriteArtifactsManifestNameTraversalRejected(t *testing.T) {
 	}
 	if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestWriteArtifactsWriteFailureRollsBack(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+			{Path: "/B", Kind: olecfb.ArtifactStream, Raw: []byte("bbb")},
+		},
+	}
+	outDir := t.TempDir()
+	origWriteFile := writeFile
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasSuffix(filepath.ToSlash(name), "000001_B.bin") {
+			return errors.New("forced write failure")
+		}
+		return origWriteFile(name, data, perm)
+	}
+	defer func() { writeFile = origWriteFile }()
+
+	if _, err := WriteArtifacts(rep, outDir, WriteOptions{}); err == nil {
+		t.Fatal("expected write failure")
+	} else if !olecfb.IsCode(err, olecfb.ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000000_A.bin")); err == nil {
+		t.Fatal("expected rollback to remove first artifact file")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
+func TestWriteArtifactsManifestFailureRollsBack(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+		},
+	}
+	outDir := t.TempDir()
+	origWriteFile := writeFile
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasSuffix(filepath.ToSlash(name), "manifest.json") {
+			return errors.New("forced manifest failure")
+		}
+		return origWriteFile(name, data, perm)
+	}
+	defer func() { writeFile = origWriteFile }()
+
+	if _, err := WriteArtifacts(rep, outDir, WriteOptions{WriteManifest: true}); err == nil {
+		t.Fatal("expected manifest write failure")
+	} else if !olecfb.IsCode(err, olecfb.ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000000_A.bin")); err == nil {
+		t.Fatal("expected rollback to remove artifact file after manifest failure")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
 	}
 }
 

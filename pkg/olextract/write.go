@@ -51,6 +51,8 @@ type writePlan struct {
 	abs      string
 }
 
+var writeFile = os.WriteFile
+
 // WriteArtifacts writes artifact raw payloads to a directory with deterministic paths.
 // Artifacts without Raw payload are skipped.
 func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOptions) (WriteResult, error) {
@@ -175,7 +177,10 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 				Cause:   err,
 			}
 		}
-		if err := os.WriteFile(plan.abs, plan.artifact.Raw, 0o644); err != nil {
+		if err := writeFile(plan.abs, plan.artifact.Raw, 0o644); err != nil {
+			if !opt.Overwrite {
+				rollbackWrittenFiles(out.Files)
+			}
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrUnsupported,
 				Message: "write artifact file failed",
@@ -197,6 +202,10 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 	}
 	if manifestPath != "" {
 		if err := writeManifestFile(manifestPath, report, out); err != nil {
+			if !opt.Overwrite {
+				rollbackWrittenFiles(out.Files)
+				_ = os.Remove(manifestPath)
+			}
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrUnsupported,
 				Message: "write manifest failed",
@@ -209,6 +218,12 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 		out.ManifestPath = manifestPath
 	}
 	return out, nil
+}
+
+func rollbackWrittenFiles(files []WrittenFile) {
+	for i := len(files) - 1; i >= 0; i-- {
+		_ = os.Remove(files[i].FilePath)
+	}
 }
 
 func validateManifestName(name string) (string, error) {
@@ -444,7 +459,7 @@ func writeManifestFile(path string, report *olecfb.ExtractReport, res WriteResul
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, buf, 0o644)
+	return writeFile(path, buf, 0o644)
 }
 
 func extensionByArtifact(a olecfb.Artifact) string {

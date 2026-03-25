@@ -70,6 +70,7 @@ func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.O
 - `WriteResult.Files[*].RelativePath` 和 manifest 的 `relative_path` 为相对 `dstDir` 的稳定路径映射。
 - 路径段会规避 Windows 保留名（如 `CON`/`PRN`/`AUX`/`NUL`/`COM1`/`LPT1`）以保证跨平台可写性。
 - 当 `Overwrite=false` 时，先做全量冲突预检；若有冲突则不写入任何 artifact 文件。
+- 当 `Overwrite=false` 且写入阶段发生错误（包括 manifest 写入失败）时，会回滚已写入 artifact 文件。
 
 `oleds` 基础解析 API：
 
