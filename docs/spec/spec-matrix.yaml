@@ -48,6 +48,7 @@ items:
     tests:
       - "integration/tx_commit_atomic"
       - "integration/tx_revert"
+      - "integration/tx_commit_failure_no_pollution"
 
   - id: CFB-PATH-001
     section: "Path canonicalization"
