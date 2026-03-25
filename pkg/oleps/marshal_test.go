@@ -92,3 +92,30 @@ func TestMarshalNilStream(t *testing.T) {
 	}
 }
 
+func TestMarshalRangeValidation(t *testing.T) {
+	s := &Stream{
+		ByteOrder: 0xFFFE,
+		Sets: []PropertySet{
+			{
+				FormatID: FMTIDSummaryInformation,
+				Properties: map[uint32]Property{
+					1: {ID: 1, Type: VTI2, Value: int64(40000)}, // out of int16 range
+				},
+				Order: []uint32{1},
+			},
+		},
+	}
+	if _, err := Marshal(s); err == nil {
+		t.Fatal("expected marshal range error for VT_I2")
+	}
+
+	s.Sets[0].Properties[1] = Property{ID: 1, Type: VTUI4, Value: int64(-1)}
+	if _, err := Marshal(s); err == nil {
+		t.Fatal("expected marshal range error for VT_UI4")
+	}
+
+	s.Sets[0].Properties[1] = Property{ID: 1, Type: VTUI8, Value: int64(-1)}
+	if _, err := Marshal(s); err == nil {
+		t.Fatal("expected marshal range error for VT_UI8")
+	}
+}

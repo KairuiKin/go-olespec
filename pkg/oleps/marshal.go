@@ -3,6 +3,7 @@ package oleps
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 	"unicode/utf16"
@@ -214,12 +215,24 @@ func toInt16(v any) (int16, bool) {
 	case int16:
 		return x, true
 	case int32:
+		if x < math.MinInt16 || x > math.MaxInt16 {
+			return 0, false
+		}
 		return int16(x), true
 	case int64:
+		if x < math.MinInt16 || x > math.MaxInt16 {
+			return 0, false
+		}
 		return int16(x), true
 	case uint32:
+		if x > math.MaxInt16 {
+			return 0, false
+		}
 		return int16(x), true
 	case uint64:
+		if x > math.MaxInt16 {
+			return 0, false
+		}
 		return int16(x), true
 	default:
 		return 0, false
@@ -233,10 +246,19 @@ func toInt32(v any) (int32, bool) {
 	case int32:
 		return x, true
 	case int64:
+		if x < math.MinInt32 || x > math.MaxInt32 {
+			return 0, false
+		}
 		return int32(x), true
 	case uint32:
+		if x > math.MaxInt32 {
+			return 0, false
+		}
 		return int32(x), true
 	case uint64:
+		if x > math.MaxInt32 {
+			return 0, false
+		}
 		return int32(x), true
 	default:
 		return 0, false
@@ -254,6 +276,9 @@ func toInt64(v any) (int64, bool) {
 	case uint32:
 		return int64(x), true
 	case uint64:
+		if x > math.MaxInt64 {
+			return 0, false
+		}
 		return int64(x), true
 	default:
 		return 0, false
@@ -263,14 +288,26 @@ func toInt64(v any) (int64, bool) {
 func toUint32(v any) (uint32, bool) {
 	switch x := v.(type) {
 	case int16:
+		if x < 0 {
+			return 0, false
+		}
 		return uint32(x), true
 	case int32:
+		if x < 0 {
+			return 0, false
+		}
 		return uint32(x), true
 	case int64:
+		if x < 0 || x > math.MaxUint32 {
+			return 0, false
+		}
 		return uint32(x), true
 	case uint32:
 		return x, true
 	case uint64:
+		if x > math.MaxUint32 {
+			return 0, false
+		}
 		return uint32(x), true
 	default:
 		return 0, false
@@ -280,10 +317,19 @@ func toUint32(v any) (uint32, bool) {
 func toUint64(v any) (uint64, bool) {
 	switch x := v.(type) {
 	case int16:
+		if x < 0 {
+			return 0, false
+		}
 		return uint64(x), true
 	case int32:
+		if x < 0 {
+			return 0, false
+		}
 		return uint64(x), true
 	case int64:
+		if x < 0 {
+			return 0, false
+		}
 		return uint64(x), true
 	case uint32:
 		return uint64(x), true
@@ -311,4 +357,3 @@ func appendPadding(buf []byte, wantLen int) []byte {
 	}
 	return append(buf, make([]byte, wantLen-len(buf))...)
 }
-
