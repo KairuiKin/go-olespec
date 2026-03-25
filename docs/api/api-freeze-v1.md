@@ -58,16 +58,18 @@ func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.O
 
 `WriteArtifacts`/`ExtractFileToDir` 语义：
 
-- 输出采用确定性平铺文件名（`%06d_<sanitized-path>.<ext>`）。
+- 输出采用确定性路径命名：`flat` 为 `%06d_<sanitized-path>.<ext>`，`tree` 为按路径拆目录。
 - `WriteArtifacts` 仅写 `Artifact.Raw` 非空的条目；空 `Raw` 条目计入 `Skipped`。
 - `ExtractFileToDir` 强制开启 `IncludeRaw=true` 后再执行提取与写盘。
 - `WriteOptions.Layout` 支持：
   - `flat`（默认）：平铺文件
   - `tree`：按 artifact 路径拆目录（`!` 转为 `_ole_` 目录层）
 - `WriteOptions.WriteManifest=true` 时额外写出 `manifest.json`（可用 `ManifestName` 自定义文件名）。
+- `ManifestName` 必须是纯文件名（不可含路径分隔符、不可为绝对路径）。
 - 对 `ArtifactOleObj`/`ArtifactStream` 且存在 `OLEFileName` 的条目，写盘后缀优先使用 `OLEFileName` 的安全扩展名（如 `.txt`）。
 - `WriteResult.Files[*].RelativePath` 和 manifest 的 `relative_path` 为相对 `dstDir` 的稳定路径映射。
 - 路径段会规避 Windows 保留名（如 `CON`/`PRN`/`AUX`/`NUL`/`COM1`/`LPT1`）以保证跨平台可写性。
+- 当 `Overwrite=false` 时，先做全量冲突预检；若有冲突则不写入任何 artifact 文件。
 
 `oleds` 基础解析 API：
 

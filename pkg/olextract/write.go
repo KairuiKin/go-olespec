@@ -45,7 +45,13 @@ const (
 	WriteLayoutTree WriteLayout = "tree"
 )
 
-// WriteArtifacts writes artifact raw payloads to a directory using deterministic flat file names.
+type writePlan struct {
+	artifact olecfb.Artifact
+	rel      string
+	abs      string
+}
+
+// WriteArtifacts writes artifact raw payloads to a directory with deterministic paths.
 // Artifacts without Raw payload are skipped.
 func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOptions) (WriteResult, error) {
 	if report == nil {
@@ -88,6 +94,7 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 	}
 
 	out := WriteResult{}
+	plans := make([]writePlan, 0, len(report.Artifacts))
 	for i, a := range report.Artifacts {
 		if len(a.Raw) == 0 {
 			out.Skipped++
@@ -101,13 +108,27 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 			rel = buildArtifactFileName(i, a)
 		}
 		p := filepath.Join(dstDir, rel)
-		if !opt.Overwrite {
-			if _, err := os.Stat(p); err == nil {
+		plans = append(plans, writePlan{artifact: a, rel: rel, abs: p})
+	}
+
+	var manifestPath string
+	if opt.WriteManifest {
+		name, err := validateManifestName(opt.ManifestName)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		manifestPath = filepath.Join(dstDir, name)
+	}
+
+	// Preflight conflicts before any writes to avoid partial output on conflict.
+	if !opt.Overwrite {
+		for _, plan := range plans {
+			if _, err := os.Stat(plan.abs); err == nil {
 				return WriteResult{}, &olecfb.OLEError{
 					Code:    olecfb.ErrConflict,
 					Message: "destination file already exists",
 					Op:      "olextract.write_artifacts",
-					Path:    p,
+					Path:    plan.abs,
 					Offset:  -1,
 				}
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -115,55 +136,19 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 					Code:    olecfb.ErrUnsupported,
 					Message: "check destination file failed",
 					Op:      "olextract.write_artifacts",
-					Path:    p,
+					Path:    plan.abs,
 					Offset:  -1,
 					Cause:   err,
 				}
 			}
 		}
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return WriteResult{}, &olecfb.OLEError{
-				Code:    olecfb.ErrUnsupported,
-				Message: "create artifact sub directory failed",
-				Op:      "olextract.write_artifacts",
-				Path:    filepath.Dir(p),
-				Offset:  -1,
-				Cause:   err,
-			}
-		}
-		if err := os.WriteFile(p, a.Raw, 0o644); err != nil {
-			return WriteResult{}, &olecfb.OLEError{
-				Code:    olecfb.ErrUnsupported,
-				Message: "write artifact file failed",
-				Op:      "olextract.write_artifacts",
-				Path:    p,
-				Offset:  -1,
-				Cause:   err,
-			}
-		}
-		out.FilesWritten++
-		out.BytesWritten += int64(len(a.Raw))
-		out.Files = append(out.Files, WrittenFile{
-			ArtifactID:   a.ID,
-			ArtifactPath: a.Path,
-			RelativePath: rel,
-			FilePath:     p,
-			Size:         int64(len(a.Raw)),
-		})
-	}
-	if opt.WriteManifest {
-		name := opt.ManifestName
-		if strings.TrimSpace(name) == "" {
-			name = "manifest.json"
-		}
-		mp := filepath.Join(dstDir, name)
-		if !opt.Overwrite {
-			if _, err := os.Stat(mp); err == nil {
+		if manifestPath != "" {
+			if _, err := os.Stat(manifestPath); err == nil {
 				return WriteResult{}, &olecfb.OLEError{
 					Code:    olecfb.ErrConflict,
 					Message: "manifest file already exists",
 					Op:      "olextract.write_artifacts",
-					Path:    mp,
+					Path:    manifestPath,
 					Offset:  -1,
 				}
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -171,25 +156,80 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 					Code:    olecfb.ErrUnsupported,
 					Message: "check manifest file failed",
 					Op:      "olextract.write_artifacts",
-					Path:    mp,
+					Path:    manifestPath,
 					Offset:  -1,
 					Cause:   err,
 				}
 			}
 		}
-		if err := writeManifestFile(mp, report, out); err != nil {
+	}
+
+	for _, plan := range plans {
+		if err := os.MkdirAll(filepath.Dir(plan.abs), 0o755); err != nil {
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrUnsupported,
-				Message: "write manifest failed",
+				Message: "create artifact sub directory failed",
 				Op:      "olextract.write_artifacts",
-				Path:    mp,
+				Path:    filepath.Dir(plan.abs),
 				Offset:  -1,
 				Cause:   err,
 			}
 		}
-		out.ManifestPath = mp
+		if err := os.WriteFile(plan.abs, plan.artifact.Raw, 0o644); err != nil {
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrUnsupported,
+				Message: "write artifact file failed",
+				Op:      "olextract.write_artifacts",
+				Path:    plan.abs,
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+		out.FilesWritten++
+		out.BytesWritten += int64(len(plan.artifact.Raw))
+		out.Files = append(out.Files, WrittenFile{
+			ArtifactID:   plan.artifact.ID,
+			ArtifactPath: plan.artifact.Path,
+			RelativePath: plan.rel,
+			FilePath:     plan.abs,
+			Size:         int64(len(plan.artifact.Raw)),
+		})
+	}
+	if manifestPath != "" {
+		if err := writeManifestFile(manifestPath, report, out); err != nil {
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrUnsupported,
+				Message: "write manifest failed",
+				Op:      "olextract.write_artifacts",
+				Path:    manifestPath,
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+		out.ManifestPath = manifestPath
 	}
 	return out, nil
+}
+
+func validateManifestName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "manifest.json", nil
+	}
+	if filepath.IsAbs(name) ||
+		strings.Contains(name, "/") ||
+		strings.Contains(name, "\\") ||
+		name == "." ||
+		name == ".." ||
+		filepath.Base(name) != name {
+		return "", &olecfb.OLEError{
+			Code:    olecfb.ErrInvalidArgument,
+			Message: "manifest name must be a file name without path separators",
+			Op:      "olextract.write_artifacts",
+			Offset:  -1,
+		}
+	}
+	return name, nil
 }
 
 // ExtractFileToDir extracts artifacts from a file and writes raw payloads to dstDir.

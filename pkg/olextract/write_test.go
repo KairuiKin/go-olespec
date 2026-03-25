@@ -87,6 +87,30 @@ func TestWriteArtifactsConflict(t *testing.T) {
 	}
 }
 
+func TestWriteArtifactsConflictNoPartialWrites(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+			{Path: "/B", Kind: olecfb.ArtifactStream, Raw: []byte("bbb")},
+		},
+	}
+	outDir := t.TempDir()
+	// Pre-create the second target to trigger conflict.
+	if err := os.WriteFile(filepath.Join(outDir, "000001_B.bin"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if _, err := WriteArtifacts(rep, outDir, WriteOptions{}); err == nil {
+		t.Fatal("expected conflict")
+	} else if !olecfb.IsCode(err, olecfb.ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000000_A.bin")); err == nil {
+		t.Fatal("unexpected partial write for first file")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
 func TestWriteArtifactsTreeLayoutAndManifest(t *testing.T) {
 	rep := &olecfb.ExtractReport{
 		Artifacts: []olecfb.Artifact{
@@ -178,6 +202,46 @@ func TestWriteArtifactsManifestConflict(t *testing.T) {
 		t.Fatal("expected manifest conflict")
 	} else if !olecfb.IsCode(err, olecfb.ErrConflict) {
 		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestWriteArtifactsManifestConflictNoPartialWrites(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+		},
+	}
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, "manifest.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if _, err := WriteArtifacts(rep, outDir, WriteOptions{WriteManifest: true}); err == nil {
+		t.Fatal("expected manifest conflict")
+	} else if !olecfb.IsCode(err, olecfb.ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000000_A.bin")); err == nil {
+		t.Fatal("unexpected partial write before manifest conflict")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
+func TestWriteArtifactsManifestNameTraversalRejected(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("a")},
+		},
+	}
+	_, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{
+		WriteManifest: true,
+		ManifestName:  "../manifest.json",
+	})
+	if err == nil {
+		t.Fatal("expected invalid manifest name error")
+	}
+	if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
 	}
 }
 

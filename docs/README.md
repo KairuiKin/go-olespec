@@ -8,3 +8,4 @@
 - `architecture/oledoc-model-v1.md`: 文档视图模型与变更集协议
 - `api/api-freeze-v1.md`: v1 公共接口冻结草案
 - `spec/spec-matrix.yaml`: 规范条款到测试用例映射模板
+- `roadmap/development-roadmap.md`: 研发路线图与里程碑
