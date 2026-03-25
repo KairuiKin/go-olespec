@@ -357,3 +357,54 @@ func TestTxCommitPreservesV4Geometry(t *testing.T) {
 		t.Fatalf("unexpected payload: %q", string(got))
 	}
 }
+
+func TestTxCommitIncrementalInPlaceUpdate(t *testing.T) {
+	base, _ := buildValidV4FileWithSingleNormalStream()
+	f, err := OpenBytesRW(base, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytesRW returned error: %v", err)
+	}
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	payload := bytes.Repeat([]byte{0x5A}, 4096)
+	if err := tx.PutStream("/Blob", bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatalf("PutStream returned error: %v", err)
+	}
+	res, err := tx.Commit(nil, CommitOptions{Strategy: Incremental})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if res.BytesWritten != int64(len(payload)) {
+		t.Fatalf("unexpected bytes written: got %d want %d", res.BytesWritten, len(payload))
+	}
+	if res.NewSize != int64(len(base)) {
+		t.Fatalf("unexpected new size: got %d want %d", res.NewSize, len(base))
+	}
+
+	sr, err := f.OpenStream("/Blob")
+	if err != nil {
+		t.Fatalf("OpenStream returned error: %v", err)
+	}
+	defer sr.Close()
+	head := make([]byte, 8)
+	if _, err := io.ReadFull(sr, head); err != nil {
+		t.Fatalf("ReadFull(head) returned error: %v", err)
+	}
+	for i, b := range head {
+		if b != 0x5A {
+			t.Fatalf("unexpected head byte at %d: 0x%02X", i, b)
+		}
+	}
+	if _, err := sr.Seek(-1, io.SeekEnd); err != nil {
+		t.Fatalf("Seek returned error: %v", err)
+	}
+	tail := make([]byte, 1)
+	if _, err := io.ReadFull(sr, tail); err != nil {
+		t.Fatalf("ReadFull(tail) returned error: %v", err)
+	}
+	if tail[0] != 0x5A {
+		t.Fatalf("unexpected tail byte: 0x%02X", tail[0])
+	}
+}

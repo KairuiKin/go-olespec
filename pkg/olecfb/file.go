@@ -40,11 +40,13 @@ type Tx struct {
 	file       *File
 	opt        TxOptions
 	closed     bool
+	topologyChanged bool
 	nodes      map[NodeID]Node
 	order      []NodeID
 	children   map[NodeID][]NodeID
 	entries    map[NodeID]dirEntry
 	streamData map[NodeID][]byte
+	touchedStreams map[NodeID]struct{}
 	nextID     NodeID
 }
 
@@ -215,6 +217,7 @@ func (f *File) Begin(opt TxOptions) (*Tx, error) {
 		children:   cloneChildren(f.children),
 		entries:    cloneEntries(f.entries),
 		streamData: cloneStreamData(f.streamData),
+		touchedStreams: map[NodeID]struct{}{},
 		nextID:     maxNodeID(f.nodes) + 1,
 	}
 	f.activeTx = tx
@@ -497,12 +500,16 @@ func (tx *Tx) PutStream(streamPath string, r io.Reader, size int64) error {
 		if node.Type != NodeStream {
 			return newError(ErrConflict, "path exists and is not a stream", "tx.put_stream", string(p), -1, nil)
 		}
+		if node.Size != int64(len(data)) {
+			tx.topologyChanged = true
+		}
 		node.Size = int64(len(data))
 		tx.nodes[id] = node
 		e := tx.entries[id]
 		e.Size = int64(len(data))
 		tx.entries[id] = e
 		tx.streamData[id] = append([]byte(nil), data...)
+		tx.touchedStreams[id] = struct{}{}
 		return nil
 	}
 
@@ -531,6 +538,7 @@ func (tx *Tx) PutStream(streamPath string, r io.Reader, size int64) error {
 		Size:         int64(len(data)),
 	}
 	tx.streamData[id] = append([]byte(nil), data...)
+	tx.topologyChanged = true
 	tx.children[parentID] = append(tx.children[parentID], id)
 	parentNode.ChildCount = len(tx.children[parentID])
 	tx.nodes[parentID] = parentNode
@@ -554,6 +562,7 @@ func (tx *Tx) Delete(deletePath string) error {
 		return newError(ErrNotFound, "path not found", "tx.delete", string(p), -1, nil)
 	}
 	toDelete := tx.collectSubtree(id)
+	tx.topologyChanged = true
 	parentID := node.ParentID
 	for _, did := range toDelete {
 		delete(tx.nodes, did)
@@ -600,6 +609,7 @@ func (tx *Tx) Rename(oldPath, newPath string) error {
 	if !parentNode.IsStorage() {
 		return newError(ErrInvalidArgument, "new parent is not a storage", "tx.rename", parentPath, -1, nil)
 	}
+	tx.topologyChanged = true
 
 	oldParentID := node.ParentID
 	node.Path = string(newP)
@@ -666,6 +676,7 @@ func (tx *Tx) CreateStorage(storagePath string) error {
 	if tx.file.opt.MaxObjectCount > 0 && len(tx.nodes)+1 > tx.file.opt.MaxObjectCount {
 		return newError(ErrLimitExceeded, "object count exceeded limit", "tx.create_storage", string(p), -1, nil)
 	}
+	tx.topologyChanged = true
 
 	id := tx.allocateID()
 	name := pathBase(string(p))
@@ -709,7 +720,16 @@ func (tx *Tx) Commit(ctx context.Context, opt CommitOptions) (*CommitResult, err
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, newError(ErrCommitFailed, "commit timed out", "tx.commit", "", -1, ctx.Err())
 	}
-	// v1: Incremental strategy falls back to full rewrite.
+	if opt.Strategy == Incremental {
+		result, err := tx.commitIncremental(ctx, opt)
+		if err == nil {
+			return result, nil
+		}
+		if !IsCode(err, ErrUnsupported) {
+			return nil, newError(ErrCommitFailed, "incremental commit failed", "tx.commit", "", -1, err)
+		}
+		// Fallback to full rewrite when incremental preconditions are not met.
+	}
 
 	snapshot, err := tx.serializeFullRewrite()
 	if err != nil {
@@ -756,6 +776,192 @@ func (tx *Tx) release() {
 	if tx.file.activeTx == tx {
 		tx.file.activeTx = nil
 	}
+}
+
+func (tx *Tx) commitIncremental(ctx context.Context, opt CommitOptions) (*CommitResult, error) {
+	if tx.file == nil || tx.file.wb == nil || tx.file.hdr == nil {
+		return nil, newError(ErrUnsupported, "incremental commit requires writable parsed container", "tx.commit_incremental", "", -1, nil)
+	}
+	if tx.topologyChanged {
+		return nil, newError(ErrUnsupported, "incremental commit requires unchanged topology", "tx.commit_incremental", "", -1, nil)
+	}
+	ids := tx.sortedTouchedStreamIDs()
+	for _, id := range ids {
+		data, ok := tx.streamData[id]
+		if !ok {
+			return nil, newError(ErrUnsupported, "incremental stream data is missing", "tx.commit_incremental", "", -1, nil)
+		}
+		if err := tx.file.validateIncrementalStreamWrite(id, data); err != nil {
+			return nil, err
+		}
+	}
+
+	var bytesWritten int64
+	for _, id := range ids {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, newError(ErrCommitFailed, "incremental commit canceled", "tx.commit_incremental", "", -1, ctx.Err())
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, newError(ErrCommitFailed, "incremental commit timed out", "tx.commit_incremental", "", -1, ctx.Err())
+		}
+		data := tx.streamData[id]
+		if err := tx.file.writeStreamByIDIncremental(id, data); err != nil {
+			return nil, err
+		}
+		bytesWritten += int64(len(data))
+	}
+
+	tx.file.mu.Lock()
+	tx.file.nodes = cloneNodes(tx.nodes)
+	tx.file.order = append([]NodeID(nil), tx.order...)
+	tx.file.children = cloneChildren(tx.children)
+	tx.file.entries = cloneEntries(tx.entries)
+	if root, ok := tx.file.nodes[0]; ok {
+		tx.file.root = root
+	}
+	if tx.file.streamData == nil {
+		tx.file.streamData = map[NodeID][]byte{}
+	}
+	for _, id := range ids {
+		tx.file.streamData[id] = append([]byte(nil), tx.streamData[id]...)
+	}
+	tx.file.mu.Unlock()
+
+	if tx.file.wb != nil && opt.Sync {
+		if err := tx.file.wb.Sync(); err != nil {
+			return nil, newError(ErrCommitFailed, "sync failed", "tx.commit_incremental", "", -1, err)
+		}
+	}
+	size := tx.file.rb.Size()
+	return &CommitResult{
+		BytesWritten: bytesWritten,
+		NewSize:      size,
+		BackendKind:  backendKind(tx.file.rb),
+	}, nil
+}
+
+func (tx *Tx) sortedTouchedStreamIDs() []NodeID {
+	ids := make([]NodeID, 0, len(tx.touchedStreams))
+	for id := range tx.touchedStreams {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+func (f *File) validateIncrementalStreamWrite(id NodeID, data []byte) error {
+	node, ok := f.nodes[id]
+	if !ok {
+		return newError(ErrUnsupported, "incremental stream not found in base file", "tx.commit_incremental", "", -1, nil)
+	}
+	if !node.IsStream() {
+		return newError(ErrUnsupported, "incremental target is not a stream", "tx.commit_incremental", node.Path, -1, nil)
+	}
+	if int64(len(data)) != node.Size {
+		return newError(ErrUnsupported, "incremental commit requires unchanged stream size", "tx.commit_incremental", node.Path, -1, nil)
+	}
+	entry, ok := f.entries[id]
+	if !ok {
+		return newError(ErrUnsupported, "incremental stream directory entry is missing", "tx.commit_incremental", node.Path, -1, nil)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	if uint64(len(data)) < uint64(f.hdr.MiniStreamCutoff) {
+		if len(f.miniFAT) == 0 || entry.StartSector == cfbEndOfChain {
+			return newError(ErrUnsupported, "mini stream chain is unavailable for incremental write", "tx.commit_incremental", node.Path, -1, nil)
+		}
+		if _, ok := f.entries[0]; !ok {
+			return newError(ErrUnsupported, "root mini stream entry is missing", "tx.commit_incremental", "/", -1, nil)
+		}
+		return nil
+	}
+	if len(f.fat) == 0 || entry.StartSector == cfbEndOfChain {
+		return newError(ErrUnsupported, "fat chain is unavailable for incremental write", "tx.commit_incremental", node.Path, -1, nil)
+	}
+	return nil
+}
+
+func (f *File) writeStreamByIDIncremental(id NodeID, data []byte) error {
+	node := f.nodes[id]
+	entry := f.entries[id]
+	if len(data) == 0 {
+		return nil
+	}
+	if uint64(len(data)) < uint64(f.hdr.MiniStreamCutoff) {
+		return f.writeMiniStreamByID(node.Path, entry.StartSector, data)
+	}
+	return f.writeRegularStreamByID(node.Path, entry.StartSector, data)
+}
+
+func (f *File) writeRegularStreamByID(streamPath string, startSector uint32, data []byte) error {
+	sectorSize := int64(1 << f.hdr.SectorShift)
+	chain, err := walkFATChain(f.fat, startSector, f.opt.MaxChainLength)
+	if err != nil {
+		return newError(ErrUnsupported, "failed to resolve stream fat chain for incremental write", "tx.commit_incremental", streamPath, -1, err)
+	}
+	expected := ceilDiv(len(data), int(sectorSize))
+	if len(chain) < expected {
+		return newError(ErrUnsupported, "stream fat chain is shorter than payload sectors", "tx.commit_incremental", streamPath, -1, nil)
+	}
+	offset := 0
+	for i := 0; i < expected; i++ {
+		sid := chain[i]
+		chunk := int(sectorSize)
+		if rem := len(data) - offset; rem < chunk {
+			chunk = rem
+		}
+		off := sectorOffset(sid, sectorSize)
+		if err := writeAtAll(f.wb, data[offset:offset+chunk], off); err != nil {
+			return newError(ErrCommitFailed, "write regular stream sector failed", "tx.commit_incremental", streamPath, off, err)
+		}
+		offset += chunk
+	}
+	return nil
+}
+
+func (f *File) writeMiniStreamByID(streamPath string, startMiniSector uint32, data []byte) error {
+	miniChain, err := walkFATChain(f.miniFAT, startMiniSector, f.opt.MaxChainLength)
+	if err != nil {
+		return newError(ErrUnsupported, "failed to resolve mini fat chain for incremental write", "tx.commit_incremental", streamPath, -1, err)
+	}
+	miniSectorSize := int64(1 << f.hdr.MiniSectorShift)
+	expectedMini := ceilDiv(len(data), int(miniSectorSize))
+	if len(miniChain) < expectedMini {
+		return newError(ErrUnsupported, "mini fat chain is shorter than payload sectors", "tx.commit_incremental", streamPath, -1, nil)
+	}
+	root, ok := f.entries[0]
+	if !ok || root.StartSector == cfbEndOfChain {
+		return newError(ErrUnsupported, "root mini stream chain is unavailable", "tx.commit_incremental", "/", -1, nil)
+	}
+	sectorSize := int64(1 << f.hdr.SectorShift)
+	rootChain, err := walkFATChain(f.fat, root.StartSector, f.opt.MaxChainLength)
+	if err != nil {
+		return newError(ErrUnsupported, "failed to resolve root mini stream chain", "tx.commit_incremental", "/", -1, err)
+	}
+
+	offset := 0
+	for i := 0; i < expectedMini; i++ {
+		chunk := int(miniSectorSize)
+		if rem := len(data) - offset; rem < chunk {
+			chunk = rem
+		}
+		miniOff := int64(miniChain[i]) * miniSectorSize
+		rootSectorIndex := int(miniOff / sectorSize)
+		if rootSectorIndex >= len(rootChain) {
+			return newError(ErrUnsupported, "root mini stream chain is shorter than required", "tx.commit_incremental", streamPath, miniOff, nil)
+		}
+		inner := miniOff % sectorSize
+		off := sectorOffset(rootChain[rootSectorIndex], sectorSize) + inner
+		if err := writeAtAll(f.wb, data[offset:offset+chunk], off); err != nil {
+			return newError(ErrCommitFailed, "write mini stream sector failed", "tx.commit_incremental", streamPath, off, err)
+		}
+		if len(f.miniData) >= int(miniOff)+chunk {
+			copy(f.miniData[int(miniOff):int(miniOff)+chunk], data[offset:offset+chunk])
+		}
+		offset += chunk
+	}
+	return nil
 }
 
 func backendKind(rb storage.ReadBackend) string {
@@ -976,19 +1182,26 @@ func writeBackendBytes(wb storage.WriteBackend, data []byte) error {
 	if wb == nil {
 		return newError(ErrReadOnly, "write backend is nil", "backend.write_all", "", -1, nil)
 	}
-	off := int64(0)
-	for off < int64(len(data)) {
-		n, err := wb.WriteAt(data[off:], off)
+	if err := writeAtAll(wb, data, 0); err != nil {
+		return err
+	}
+	if err := wb.Truncate(int64(len(data))); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeAtAll(wb storage.WriteBackend, p []byte, off int64) error {
+	written := 0
+	for written < len(p) {
+		n, err := wb.WriteAt(p[written:], off+int64(written))
 		if err != nil {
 			return err
 		}
 		if n <= 0 {
 			return io.ErrShortWrite
 		}
-		off += int64(n)
-	}
-	if err := wb.Truncate(int64(len(data))); err != nil {
-		return err
+		written += n
 	}
 	return nil
 }
