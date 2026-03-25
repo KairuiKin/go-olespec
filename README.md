@@ -17,6 +17,10 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 go run ./cmd/corpus-replay -root ./samples -ext .doc,.xls,.ppt,.cfb -mode lenient -output ./report.json
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -max-newly-failed 0 -min-pass-rate 0.98
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)

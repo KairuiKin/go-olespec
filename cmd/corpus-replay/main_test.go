@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
@@ -70,6 +71,81 @@ func TestRunReplayOutputFile(t *testing.T) {
 func TestParseModeInvalid(t *testing.T) {
 	if _, err := parseMode("bad"); err == nil {
 		t.Fatal("expected parseMode error")
+	}
+}
+
+func TestRunReplayBaselineDiffAndNewlyFailedGate(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.cfb")
+	if err := os.WriteFile(target, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile target returned error: %v", err)
+	}
+	baselinePath := filepath.Join(root, "baseline.json")
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-output", baselinePath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("baseline run returned error: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("bad"), 0o644); err != nil {
+		t.Fatalf("overwrite target returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-baseline", baselinePath,
+		"-max-newly-failed", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected gate failure")
+	}
+	if !strings.Contains(err.Error(), "newly_failed") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Baseline == nil {
+		t.Fatal("expected baseline diff in report")
+	}
+	if rep.Baseline.NewlyFailed != 1 {
+		t.Fatalf("unexpected newly failed: %d", rep.Baseline.NewlyFailed)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate to fail")
+	}
+}
+
+func TestRunReplayMaxFailedGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	var out bytes.Buffer
+	err := run([]string{"-root", root, "-ext", ".cfb", "-max-failed", "0"}, &out)
+	if err == nil {
+		t.Fatal("expected max-failed gate error")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.Failed != 1 {
+		t.Fatalf("unexpected failed count: %d", rep.Summary.Failed)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayMaxNewlyFailedRequiresBaseline(t *testing.T) {
+	var out bytes.Buffer
+	err := run([]string{"-max-newly-failed", "0"}, &out)
+	if err == nil {
+		t.Fatal("expected validation error")
 	}
 }
 
