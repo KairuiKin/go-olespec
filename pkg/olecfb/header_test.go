@@ -299,6 +299,76 @@ func TestExtract_DetectOLEDS(t *testing.T) {
 	}
 }
 
+func TestExtract_UnwrapOle10Native(t *testing.T) {
+	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
+	payload := buildOle10NativeBytes("inner.cfb", "C:\\inner.cfb", innerBytes)
+	fileBytes := buildValidV4FileWithBigNamedStream("\x01Ole10Native", payload)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{
+		Deduplicate:       false,
+		DetectOLEDS:       true,
+		UnwrapOle10Native: true,
+		Limits:            ExtractLimits{MaxDepth: 4},
+	})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+
+	var parent, child, grand *Artifact
+	for i := range rep.Artifacts {
+		a := &rep.Artifacts[i]
+		switch a.Path {
+		case "/\x01Ole10Native":
+			parent = a
+		case "/\x01Ole10Native!$ole10native":
+			child = a
+		case "/\x01Ole10Native!$ole10native!/Blob":
+			grand = a
+		}
+	}
+	if parent == nil {
+		t.Fatal("parent Ole10Native stream artifact not found")
+	}
+	if child == nil {
+		t.Fatal("unwrapped Ole10Native payload artifact not found")
+	}
+	if grand == nil {
+		t.Fatal("nested OLE child artifact not found")
+	}
+	if child.ParentID != parent.ID {
+		t.Fatalf("unexpected unwrapped parent id: got %q want %q", child.ParentID, parent.ID)
+	}
+	if grand.ParentID != child.ID {
+		t.Fatalf("unexpected nested parent id: got %q want %q", grand.ParentID, child.ID)
+	}
+}
+
+func TestExtract_UnwrapOle10NativeDisabled(t *testing.T) {
+	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
+	payload := buildOle10NativeBytes("inner.cfb", "C:\\inner.cfb", innerBytes)
+	fileBytes := buildValidV4FileWithBigNamedStream("\x01Ole10Native", payload)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{
+		Deduplicate:       false,
+		DetectOLEDS:       true,
+		UnwrapOle10Native: false,
+	})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	for _, a := range rep.Artifacts {
+		if a.Path == "/\x01Ole10Native!$ole10native" || a.Path == "/\x01Ole10Native!$ole10native!/Blob" {
+			t.Fatalf("unexpected unwrapped artifact when disabled: %s", a.Path)
+		}
+	}
+}
+
 func TestExtract_DetectImages(t *testing.T) {
 	pngPrefix := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	fileBytes, _ := buildValidV4FileWithNamedStream("Image1", pngPrefix)

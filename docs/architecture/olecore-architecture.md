@@ -14,6 +14,7 @@
 - 属性集（OLEPS）解析与写回。
 - 常见 OLE 对象载荷识别（Ole10Native/CompObj/Package）。
 - 递归提取与去重、限流、容错报告。
+- 支持 `Ole10Native` payload 解包并继续递归提取（可配置开启）。
 
 ### v1 非目标
 

@@ -141,6 +141,10 @@ type StreamReader interface {
 - 仅支持“单个已存在流、大小不变”的原位更新
 - 其他场景自动回退 `FullRewrite`
 
+`ExtractOptions` 追加字段：
+
+- `UnwrapOle10Native bool`：开启后会解析 `Ole10Native` 流并把内嵌 payload 作为子 artifact 继续提取（含嵌套 OLE 递归）。
+
 ## 6. Error Contract
 
 - 所有对外错误必须是 `*OLEError` 或可 `errors.As` 到 `*OLEError`。

@@ -225,12 +225,13 @@ type ExtractLimits struct {
 }
 
 type ExtractOptions struct {
-	Mode         ParseMode
-	Limits       ExtractLimits
-	IncludeRaw   bool
-	DetectImages bool
-	DetectOLEDS  bool
-	Deduplicate  bool
+	Mode              ParseMode
+	Limits            ExtractLimits
+	IncludeRaw        bool
+	DetectImages      bool
+	DetectOLEDS       bool
+	UnwrapOle10Native bool
+	Deduplicate       bool
 }
 
 type ExtractStats struct {

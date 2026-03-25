@@ -1,6 +1,7 @@
 package olecfb
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -11,18 +12,18 @@ import (
 )
 
 type extractWalker struct {
-	report         *ExtractReport
-	opt            ExtractOptions
-	openOpt        OpenOptions
-	seen           map[string]struct{}
-	totalBytes     int64
-	maxDepth       int
-	maxArtifacts   int
-	maxTotalBytes  int64
+	report          *ExtractReport
+	opt             ExtractOptions
+	openOpt         OpenOptions
+	seen            map[string]struct{}
+	totalBytes      int64
+	maxDepth        int
+	maxArtifacts    int
+	maxTotalBytes   int64
 	maxArtifactSize int64
-	nextID         int
-	indexByID      map[string]int
-	stop           bool
+	nextID          int
+	indexByID       map[string]int
+	stop            bool
 }
 
 func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
@@ -172,8 +173,12 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 			artifact.MediaType = media
 		}
 	}
+	var oledsDetection oleds.Detection
+	if w.opt.DetectOLEDS || w.opt.UnwrapOle10Native {
+		oledsDetection = oleds.Detect(n.Path, head)
+	}
 	if w.opt.DetectOLEDS {
-		d := oleds.Detect(n.Path, head)
+		d := oledsDetection
 		switch d.Kind {
 		case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
 			artifact.Kind = ArtifactOleObj
@@ -201,7 +206,7 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 		w.stop = true
 		return
 	}
-	needsPayload := w.opt.IncludeRaw || isOLE
+	needsPayload := w.opt.IncludeRaw || isOLE || (w.opt.UnwrapOle10Native && oledsDetection.Kind == oleds.KindOle10Native)
 	var payload []byte
 	if needsPayload {
 		payload, err = readStreamAll(file, n.Path, w.maxArtifactSize)
@@ -217,6 +222,17 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 
 	w.totalBytes += artifact.Size
 	w.appendArtifact(artifact)
+	if w.opt.UnwrapOle10Native && oledsDetection.Kind == oleds.KindOle10Native && !w.stop {
+		if payload == nil {
+			payload, err = readStreamAll(file, n.Path, w.maxArtifactSize)
+			if err != nil {
+				w.report.Partial = true
+				w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+				return
+			}
+		}
+		w.walkOle10NativePayload(n, artifact, payload, depth)
+	}
 	if !isOLE || w.stop {
 		return
 	}
@@ -250,6 +266,135 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 	}
 	defer nested.Close()
 	w.walkFile(nested, artifact.Path, artifact.ID, depth+1)
+}
+
+func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, streamPayload []byte, depth int) {
+	native, ok := oleds.ParseOle10Native(streamPayload)
+	if !ok {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrUnsupported,
+			Message:  "parse Ole10Native payload failed",
+			Path:     parent.Path,
+			Offset:   -1,
+			Op:       "extract.unwrap_ole10native",
+			Severity: SeverityWarning,
+		})
+		return
+	}
+	embeddedPath := joinArtifactPath(parent.Path, "$ole10native")
+	if len(native.Payload) == 0 {
+		return
+	}
+	if len(w.report.Artifacts) >= w.maxArtifacts {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrLimitExceeded,
+			Message:  "artifact count limit exceeded",
+			Path:     embeddedPath,
+			Offset:   -1,
+			Op:       "extract.unwrap_ole10native",
+			Severity: SeverityWarning,
+		})
+		w.stop = true
+		return
+	}
+	if w.maxArtifactSize > 0 && int64(len(native.Payload)) > w.maxArtifactSize {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrLimitExceeded,
+			Message:  "artifact size limit exceeded",
+			Path:     embeddedPath,
+			Offset:   -1,
+			Op:       "extract.unwrap_ole10native",
+			Severity: SeverityWarning,
+		})
+		return
+	}
+
+	sum, size, isOLE, head, err := hashAndProbeStream(bytes.NewReader(native.Payload))
+	if err != nil {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+		return
+	}
+	artifact := Artifact{
+		ID:           w.newArtifactID(sum),
+		Kind:         ArtifactStream,
+		Status:       ArtifactOK,
+		Path:         embeddedPath,
+		Size:         size,
+		SHA256:       sum,
+		Depth:        depth + 1,
+		ParentID:     parent.ID,
+		SourceNodeID: source.ID,
+	}
+	if isOLE {
+		artifact.Kind = ArtifactOLEFile
+	}
+	if w.opt.DetectImages {
+		if media, ok := detectImageMedia(head); ok {
+			artifact.Kind = ArtifactImage
+			artifact.MediaType = media
+		}
+	}
+	if w.opt.DetectOLEDS {
+		d := oleds.Detect(embeddedPath, head)
+		switch d.Kind {
+		case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
+			artifact.Kind = ArtifactOleObj
+			artifact.Note = "oleds:" + string(d.Kind)
+		}
+	}
+	if w.opt.Deduplicate {
+		if _, ok := w.seen[artifact.SHA256]; ok {
+			w.report.Stats.DedupHits++
+			return
+		}
+		w.seen[artifact.SHA256] = struct{}{}
+	}
+	if w.maxTotalBytes > 0 && w.totalBytes+artifact.Size > w.maxTotalBytes {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrQuotaExceeded,
+			Message:  "total extracted bytes limit exceeded",
+			Path:     artifact.Path,
+			Offset:   -1,
+			Op:       "extract.unwrap_ole10native",
+			Severity: SeverityWarning,
+		})
+		w.stop = true
+		return
+	}
+	if w.opt.IncludeRaw {
+		artifact.Raw = append([]byte(nil), native.Payload...)
+	}
+	w.totalBytes += artifact.Size
+	w.appendArtifact(artifact)
+	if !isOLE || w.stop {
+		return
+	}
+
+	if w.maxDepth > 0 && artifact.Depth >= w.maxDepth {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrDepthExceeded,
+			Message:  "extract depth limit reached",
+			Path:     artifact.Path,
+			Offset:   -1,
+			Op:       "extract.unwrap_ole10native",
+			Severity: SeverityWarning,
+		})
+		return
+	}
+	nested, err := OpenBytes(native.Payload, w.openOpt)
+	if err != nil {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+		return
+	}
+	defer nested.Close()
+	w.walkFile(nested, artifact.Path, artifact.ID, artifact.Depth+1)
 }
 
 func (w *extractWalker) appendArtifact(a Artifact) {

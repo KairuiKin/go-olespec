@@ -103,6 +103,7 @@ items:
       - "integration/extract_dedup"
       - "integration/extract_artifact_limit"
       - "integration/extract_deterministic"
+      - "integration/extract_unwrap_ole10native"
 
   - id: PERF-001
     section: "Performance baseline"
