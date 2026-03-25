@@ -136,6 +136,7 @@ items:
       - "integration/corpus_replay_cli"
       - "integration/corpus_replay_baseline_diff_gate"
       - "integration/corpus_replay_error_code_gates"
+      - "integration/corpus_replay_trend_summary"
       - "fuzz/olextract_write_artifacts"
 
   - id: PERF-001

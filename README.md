@@ -25,6 +25,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -max-new-error-codes 0 -max-error-code-regressions 0 -deny-error-codes BAD_HEADER,DIR_CORRUPT
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -run-id $(git rev-parse --short HEAD) -trend-dir ./reports/history -trend-limit 30
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)

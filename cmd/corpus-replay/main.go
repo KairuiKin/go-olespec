@@ -21,7 +21,10 @@ type replayOptions struct {
 	Root            string   `json:"root"`
 	Extensions      []string `json:"extensions"`
 	Mode            string   `json:"mode"`
+	RunID           string   `json:"run_id,omitempty"`
 	BaselineReport  string   `json:"baseline_report,omitempty"`
+	TrendDir        string   `json:"trend_dir,omitempty"`
+	TrendLimit      int      `json:"trend_limit,omitempty"`
 	IncludeRaw      bool     `json:"include_raw"`
 	DetectImages    bool     `json:"detect_images"`
 	DetectOLEDS     bool     `json:"detect_oleds"`
@@ -65,6 +68,7 @@ type replayReport struct {
 	Summary     replaySummary      `json:"summary"`
 	Files       []replayFileResult `json:"files"`
 	Baseline    *replayBaseline    `json:"baseline,omitempty"`
+	Trend       *replayTrend       `json:"trend,omitempty"`
 	Gate        replayGateResult   `json:"gate"`
 }
 
@@ -99,6 +103,31 @@ type replayRegression struct {
 	Current  string `json:"current"`
 }
 
+type replayTrend struct {
+	SourceDir   string             `json:"source_dir"`
+	Points      []replayTrendPoint `json:"points"`
+	LatestDelta *replayTrendDelta  `json:"latest_delta,omitempty"`
+}
+
+type replayTrendPoint struct {
+	GeneratedAt string  `json:"generated_at"`
+	RunID       string  `json:"run_id,omitempty"`
+	ReportPath  string  `json:"report_path,omitempty"`
+	Processed   int     `json:"processed"`
+	Success     int     `json:"success"`
+	Failed      int     `json:"failed"`
+	Partial     int     `json:"partial"`
+	PassRate    float64 `json:"pass_rate"`
+}
+
+type replayTrendDelta struct {
+	FromGeneratedAt string  `json:"from_generated_at"`
+	ToGeneratedAt   string  `json:"to_generated_at"`
+	DeltaPassRate   float64 `json:"delta_pass_rate"`
+	DeltaFailed     int     `json:"delta_failed"`
+	DeltaPartial    int     `json:"delta_partial"`
+}
+
 type replayGateResult struct {
 	Enabled                 bool     `json:"enabled"`
 	Passed                  bool     `json:"passed"`
@@ -130,6 +159,9 @@ func run(args []string, out io.Writer) error {
 		extCSV                  = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
+		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
+		trendDir                = fset.String("trend-dir", "", "directory containing historical replay report JSON files for trend summary")
+		trendLimit              = fset.Int("trend-limit", 20, "max historical points to keep for trend, <=0 means unlimited")
 		includeRaw              = fset.Bool("include-raw", false, "include raw artifact payloads in extraction")
 		detectImages            = fset.Bool("detect-images", true, "enable image signature detection")
 		detectOLEDS             = fset.Bool("detect-oleds", true, "enable OLEDS stream detection")
@@ -202,7 +234,10 @@ func run(args []string, out io.Writer) error {
 		Root:            absRoot,
 		Extensions:      append([]string(nil), extensions...),
 		Mode:            strings.ToLower(*modeStr),
+		RunID:           strings.TrimSpace(*runID),
 		BaselineReport:  strings.TrimSpace(*baselinePath),
+		TrendDir:        strings.TrimSpace(*trendDir),
+		TrendLimit:      *trendLimit,
 		IncludeRaw:      *includeRaw,
 		DetectImages:    *detectImages,
 		DetectOLEDS:     *detectOLEDS,
@@ -301,6 +336,13 @@ func run(args []string, out io.Writer) error {
 			return loadErr
 		}
 		report.Baseline = diffReplayReport(*baselinePath, baseline, report)
+	}
+	if strings.TrimSpace(*trendDir) != "" {
+		trend, trendErr := buildTrend(strings.TrimSpace(*trendDir), *trendLimit, report)
+		if trendErr != nil {
+			return trendErr
+		}
+		report.Trend = trend
 	}
 
 	var minPassRatePtr *float64
@@ -676,6 +718,111 @@ func sortedUnionKeys(a, b map[string]int) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func buildTrend(dir string, limit int, current replayReport) (*replayTrend, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]trendEntry, 0, 32)
+	err = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) != ".json" {
+			return nil
+		}
+		rep, loadErr := loadReplayReport(path)
+		if loadErr != nil {
+			return nil
+		}
+		tm := parseReportTime(rep.GeneratedAt)
+		if tm.IsZero() {
+			if info, statErr := os.Stat(path); statErr == nil {
+				tm = info.ModTime()
+			}
+		}
+		entries = append(entries, trendEntry{
+			Path:   path,
+			Report: rep,
+			When:   tm,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].When.Equal(entries[j].When) {
+			return entries[i].Path < entries[j].Path
+		}
+		return entries[i].When.Before(entries[j].When)
+	})
+	if limit > 0 && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+
+	points := make([]replayTrendPoint, 0, len(entries)+1)
+	for _, e := range entries {
+		rel := e.Path
+		if r, relErr := filepath.Rel(absDir, e.Path); relErr == nil {
+			rel = filepath.ToSlash(r)
+		}
+		points = append(points, reportToTrendPoint(e.Report, rel))
+	}
+	points = append(points, reportToTrendPoint(current, "current"))
+
+	out := &replayTrend{
+		SourceDir: absDir,
+		Points:    points,
+	}
+	if len(points) >= 2 {
+		prev := points[len(points)-2]
+		last := points[len(points)-1]
+		out.LatestDelta = &replayTrendDelta{
+			FromGeneratedAt: prev.GeneratedAt,
+			ToGeneratedAt:   last.GeneratedAt,
+			DeltaPassRate:   last.PassRate - prev.PassRate,
+			DeltaFailed:     last.Failed - prev.Failed,
+			DeltaPartial:    last.Partial - prev.Partial,
+		}
+	}
+	return out, nil
+}
+
+type trendEntry struct {
+	Path   string
+	Report replayReport
+	When   time.Time
+}
+
+func parseReportTime(v string) time.Time {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return time.Time{}
+	}
+	tm, err := time.Parse(time.RFC3339Nano, v)
+	if err != nil {
+		return time.Time{}
+	}
+	return tm
+}
+
+func reportToTrendPoint(rep replayReport, reportPath string) replayTrendPoint {
+	return replayTrendPoint{
+		GeneratedAt: rep.GeneratedAt,
+		RunID:       rep.Options.RunID,
+		ReportPath:  reportPath,
+		Processed:   rep.Summary.Processed,
+		Success:     rep.Summary.Success,
+		Failed:      rep.Summary.Failed,
+		Partial:     rep.Summary.Partial,
+		PassRate:    rep.Summary.PassRate,
+	}
 }
 
 func matchesExt(path string, exts []string) bool {

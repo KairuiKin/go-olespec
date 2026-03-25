@@ -242,6 +242,111 @@ func TestRunReplayErrorCodeGatesRequireBaseline(t *testing.T) {
 	}
 }
 
+func TestRunReplayTrendSummary(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	writeTrendReport(t, filepath.Join(history, "r1.json"), replayReport{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Options:     replayOptions{RunID: "h1"},
+		Summary: replaySummary{
+			Processed: 10,
+			Success:   10,
+			Failed:    0,
+			Partial:   0,
+			PassRate:  1.0,
+		},
+	})
+	writeTrendReport(t, filepath.Join(history, "r2.json"), replayReport{
+		GeneratedAt: "2026-01-02T00:00:00Z",
+		Options:     replayOptions{RunID: "h2"},
+		Summary: replaySummary{
+			Processed: 10,
+			Success:   9,
+			Failed:    1,
+			Partial:   0,
+			PassRate:  0.9,
+		},
+	})
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-run-id", "cur",
+		"-trend-dir", history,
+	}, &out); err != nil {
+		t.Fatalf("run with trend returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Trend == nil {
+		t.Fatal("expected trend summary")
+	}
+	if len(rep.Trend.Points) != 3 {
+		t.Fatalf("unexpected trend points: %d", len(rep.Trend.Points))
+	}
+	last := rep.Trend.Points[len(rep.Trend.Points)-1]
+	if last.RunID != "cur" || last.ReportPath != "current" {
+		t.Fatalf("unexpected current point: %+v", last)
+	}
+	if rep.Trend.LatestDelta == nil {
+		t.Fatal("expected latest delta")
+	}
+}
+
+func TestRunReplayTrendLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	writeTrendReport(t, filepath.Join(history, "r1.json"), replayReport{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Options:     replayOptions{RunID: "h1"},
+		Summary:     replaySummary{Processed: 1, Success: 1, PassRate: 1},
+	})
+	writeTrendReport(t, filepath.Join(history, "r2.json"), replayReport{
+		GeneratedAt: "2026-01-02T00:00:00Z",
+		Options:     replayOptions{RunID: "h2"},
+		Summary:     replaySummary{Processed: 1, Success: 1, PassRate: 1},
+	})
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-run-id", "cur",
+		"-trend-dir", history,
+		"-trend-limit", "1",
+	}, &out); err != nil {
+		t.Fatalf("run with trend limit returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Trend == nil {
+		t.Fatal("expected trend summary")
+	}
+	if len(rep.Trend.Points) != 2 {
+		t.Fatalf("unexpected trend points count: %d", len(rep.Trend.Points))
+	}
+	if rep.Trend.Points[0].RunID != "h2" {
+		t.Fatalf("expected latest history point to be h2, got %+v", rep.Trend.Points[0])
+	}
+}
+
 func buildSampleCFB(t *testing.T) []byte {
 	t.Helper()
 	f, err := olecfb.CreateInMemory(olecfb.CreateOptions{})
@@ -267,4 +372,15 @@ func buildSampleCFB(t *testing.T) []byte {
 		t.Fatalf("SnapshotBytes returned error: %v", err)
 	}
 	return buf
+}
+
+func writeTrendReport(t *testing.T, path string, rep replayReport) {
+	t.Helper()
+	buf, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent returned error: %v", err)
+	}
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		t.Fatalf("WriteFile trend report returned error: %v", err)
+	}
 }
