@@ -128,6 +128,7 @@ type StreamReader interface {
 `Artifact` 新增可选字段：
 
 - `Raw []byte`: 当 `ExtractOptions.IncludeRaw=true` 时填充原始流字节；默认 `nil`
+- `OLEFileName/OLESourcePath/OLETempPath`: 当 `DetectOLEDS` 或 `UnwrapOle10Native` 命中 `Ole10Native` 时填充来源元信息
 
 `CommitResult` 字段：
 

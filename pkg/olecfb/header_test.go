@@ -298,6 +298,12 @@ func TestExtract_DetectOLEDS(t *testing.T) {
 	if a.Note != "oleds:ole10native" {
 		t.Fatalf("unexpected oleds note: %q", a.Note)
 	}
+	if a.OLEFileName != "a.txt" {
+		t.Fatalf("unexpected oleds file name: %q", a.OLEFileName)
+	}
+	if a.OLESourcePath != "C:\\a.txt" {
+		t.Fatalf("unexpected oleds source path: %q", a.OLESourcePath)
+	}
 }
 
 func TestExtract_UnwrapOle10Native(t *testing.T) {
@@ -347,6 +353,12 @@ func TestExtract_UnwrapOle10Native(t *testing.T) {
 	}
 	if !strings.HasPrefix(child.Note, "ole10native;file=inner.cfb") {
 		t.Fatalf("unexpected unwrapped note: %q", child.Note)
+	}
+	if child.OLEFileName != "inner.cfb" {
+		t.Fatalf("unexpected unwrapped file name: %q", child.OLEFileName)
+	}
+	if child.OLESourcePath != "C:\\inner.cfb" {
+		t.Fatalf("unexpected unwrapped source path: %q", child.OLESourcePath)
 	}
 }
 

@@ -183,6 +183,10 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 		case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
 			artifact.Kind = ArtifactOleObj
 			artifact.Note = "oleds:" + string(d.Kind)
+			if d.Kind == oleds.KindOle10Native {
+				artifact.OLEFileName = d.FileName
+				artifact.OLESourcePath = d.SourcePath
+			}
 		}
 	}
 
@@ -319,15 +323,18 @@ func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, str
 		return
 	}
 	artifact := Artifact{
-		ID:           w.newArtifactID(sum),
-		Kind:         ArtifactStream,
-		Status:       ArtifactOK,
-		Path:         embeddedPath,
-		Size:         size,
-		SHA256:       sum,
-		Depth:        depth + 1,
-		ParentID:     parent.ID,
-		SourceNodeID: source.ID,
+		ID:            w.newArtifactID(sum),
+		Kind:          ArtifactStream,
+		Status:        ArtifactOK,
+		Path:          embeddedPath,
+		Size:          size,
+		SHA256:        sum,
+		Depth:         depth + 1,
+		ParentID:      parent.ID,
+		SourceNodeID:  source.ID,
+		OLEFileName:   native.FileName,
+		OLESourcePath: native.SourcePath,
+		OLETempPath:   native.TempPath,
 	}
 	artifact.Note = "ole10native"
 	if native.FileName != "" {

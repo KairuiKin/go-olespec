@@ -201,20 +201,23 @@ const (
 )
 
 type Artifact struct {
-	ID           string
-	Kind         ArtifactKind
-	Status       ArtifactStatus
-	Path         string
-	MediaType    string
-	Size         int64
-	SHA256       string
-	Raw          []byte
-	Depth        int
-	ParentID     string
-	Children     int
-	SourceNodeID NodeID
-	Error        *OLEError
-	Note         string
+	ID            string
+	Kind          ArtifactKind
+	Status        ArtifactStatus
+	Path          string
+	MediaType     string
+	Size          int64
+	SHA256        string
+	Raw           []byte
+	Depth         int
+	ParentID      string
+	Children      int
+	SourceNodeID  NodeID
+	OLEFileName   string
+	OLESourcePath string
+	OLETempPath   string
+	Error         *OLEError
+	Note          string
 }
 
 type ExtractLimits struct {
