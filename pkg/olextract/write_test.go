@@ -275,19 +275,33 @@ func TestWriteArtifactsAtomicPublish(t *testing.T) {
 	}
 }
 
-func TestWriteArtifactsAtomicPublishRejectsOverwrite(t *testing.T) {
+func TestWriteArtifactsAtomicPublishOverwrite(t *testing.T) {
 	rep := &olecfb.ExtractReport{
 		Artifacts: []olecfb.Artifact{
 			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
 		},
 	}
-	if _, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{
+	outDir := t.TempDir()
+	target := filepath.Join(outDir, "000000_A.bin")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	res, err := WriteArtifacts(rep, outDir, WriteOptions{
 		AtomicPublish: true,
 		Overwrite:     true,
-	}); err == nil {
-		t.Fatal("expected invalid argument error")
-	} else if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
-		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if res.FilesWritten != 1 {
+		t.Fatalf("unexpected files written: %d", res.FilesWritten)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if string(got) != "aaa" {
+		t.Fatalf("unexpected overwritten payload: %q", string(got))
 	}
 }
 
@@ -324,6 +338,54 @@ func TestWriteArtifactsAtomicPublishRenameFailureRollsBack(t *testing.T) {
 		t.Fatal("expected B not to be published")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
+func TestWriteArtifactsAtomicPublishOverwriteRenameFailureRestoresOld(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("newA")},
+			{Path: "/B", Kind: olecfb.ArtifactStream, Raw: []byte("newB")},
+		},
+	}
+	outDir := t.TempDir()
+	aPath := filepath.Join(outDir, "000000_A.bin")
+	bPath := filepath.Join(outDir, "000001_B.bin")
+	if err := os.WriteFile(aPath, []byte("oldA"), 0o644); err != nil {
+		t.Fatalf("WriteFile A returned error: %v", err)
+	}
+	if err := os.WriteFile(bPath, []byte("oldB"), 0o644); err != nil {
+		t.Fatalf("WriteFile B returned error: %v", err)
+	}
+	origRenameFile := renameFile
+	renameCount := 0
+	renameFile = func(oldpath, newpath string) error {
+		renameCount++
+		if renameCount == 4 { // fail second stage->dest rename after first overwrite publish
+			return errors.New("forced rename failure")
+		}
+		return origRenameFile(oldpath, newpath)
+	}
+	defer func() { renameFile = origRenameFile }()
+
+	if _, err := WriteArtifacts(rep, outDir, WriteOptions{AtomicPublish: true, Overwrite: true}); err == nil {
+		t.Fatal("expected atomic overwrite publish failure")
+	} else if !olecfb.IsCode(err, olecfb.ErrCommitFailed) {
+		t.Fatalf("expected ErrCommitFailed, got %v", err)
+	}
+	gotA, err := os.ReadFile(aPath)
+	if err != nil {
+		t.Fatalf("ReadFile A returned error: %v", err)
+	}
+	if string(gotA) != "oldA" {
+		t.Fatalf("expected restored old A, got %q", string(gotA))
+	}
+	gotB, err := os.ReadFile(bPath)
+	if err != nil {
+		t.Fatalf("ReadFile B returned error: %v", err)
+	}
+	if string(gotB) != "oldB" {
+		t.Fatalf("expected old B unchanged, got %q", string(gotB))
 	}
 }
 

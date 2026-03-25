@@ -54,6 +54,11 @@ type writePlan struct {
 	abs      string
 }
 
+type committedRecord struct {
+	file       WrittenFile
+	backupPath string
+}
+
 var writeFile = os.WriteFile
 var renameFile = os.Rename
 
@@ -98,15 +103,6 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 			Offset:  -1,
 		}
 	}
-	if opt.AtomicPublish && opt.Overwrite {
-		return WriteResult{}, &olecfb.OLEError{
-			Code:    olecfb.ErrInvalidArgument,
-			Message: "atomic publish does not support overwrite=true",
-			Op:      "olextract.write_artifacts",
-			Offset:  -1,
-		}
-	}
-
 	out := WriteResult{}
 	plans := make([]writePlan, 0, len(report.Artifacts))
 	for i, a := range report.Artifacts {
@@ -180,7 +176,7 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 
 	if opt.AtomicPublish {
 		var err error
-		out, err = writeArtifactsAtomic(dstDir, plans, report, manifestPath, out.Skipped)
+		out, err = writeArtifactsAtomic(dstDir, plans, report, manifestPath, out.Skipped, opt.Overwrite)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -241,7 +237,7 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 	return out, nil
 }
 
-func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.ExtractReport, manifestPath string, skipped int) (WriteResult, error) {
+func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.ExtractReport, manifestPath string, skipped int, overwrite bool) (WriteResult, error) {
 	stageDir := filepath.Join(dstDir, ".olespec-stage-"+strconv.FormatInt(time.Now().UnixNano(), 10))
 	if err := os.MkdirAll(stageDir, 0o755); err != nil {
 		return WriteResult{}, &olecfb.OLEError{
@@ -288,6 +284,7 @@ func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.Extra
 		preview := WriteResult{
 			FilesWritten: len(plans),
 			BytesWritten: 0,
+			Skipped:      skipped,
 			Files:        make([]WrittenFile, 0, len(plans)),
 		}
 		for _, plan := range plans {
@@ -313,11 +310,11 @@ func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.Extra
 		}
 	}
 
-	committed := make([]WrittenFile, 0, len(plans))
+	committed := make([]committedRecord, 0, len(plans))
 	for _, plan := range plans {
 		stageAbs := stageAbsByRel[plan.rel]
 		if err := os.MkdirAll(filepath.Dir(plan.abs), 0o755); err != nil {
-			rollbackWrittenFiles(committed)
+			rollbackCommitted(committed)
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrCommitFailed,
 				Message: "create destination sub directory failed during atomic publish",
@@ -327,8 +324,38 @@ func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.Extra
 				Cause:   err,
 			}
 		}
+		backupPath := ""
+		if overwrite {
+			if _, err := os.Stat(plan.abs); err == nil {
+				backupPath = filepath.Join(stageDir, ".bak-"+strconv.Itoa(len(committed)))
+				if err := renameFile(plan.abs, backupPath); err != nil {
+					rollbackCommitted(committed)
+					return WriteResult{}, &olecfb.OLEError{
+						Code:    olecfb.ErrCommitFailed,
+						Message: "atomic publish backup rename failed",
+						Op:      "olextract.write_artifacts",
+						Path:    plan.abs,
+						Offset:  -1,
+						Cause:   err,
+					}
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				rollbackCommitted(committed)
+				return WriteResult{}, &olecfb.OLEError{
+					Code:    olecfb.ErrCommitFailed,
+					Message: "atomic publish destination stat failed",
+					Op:      "olextract.write_artifacts",
+					Path:    plan.abs,
+					Offset:  -1,
+					Cause:   err,
+				}
+			}
+		}
 		if err := renameFile(stageAbs, plan.abs); err != nil {
-			rollbackWrittenFiles(committed)
+			if backupPath != "" {
+				_ = renameFile(backupPath, plan.abs)
+			}
+			rollbackCommitted(committed)
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrCommitFailed,
 				Message: "atomic publish rename failed",
@@ -345,15 +372,48 @@ func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.Extra
 			FilePath:     plan.abs,
 			Size:         int64(len(plan.artifact.Raw)),
 		}
-		committed = append(committed, wf)
+		committed = append(committed, committedRecord{
+			file:       wf,
+			backupPath: backupPath,
+		})
 		out.Files = append(out.Files, wf)
 		out.FilesWritten++
 		out.BytesWritten += wf.Size
 	}
 
 	if manifestPath != "" {
+		manifestBackup := ""
+		if overwrite {
+			if _, err := os.Stat(manifestPath); err == nil {
+				manifestBackup = filepath.Join(stageDir, ".bak-manifest")
+				if err := renameFile(manifestPath, manifestBackup); err != nil {
+					rollbackCommitted(committed)
+					return WriteResult{}, &olecfb.OLEError{
+						Code:    olecfb.ErrCommitFailed,
+						Message: "atomic publish manifest backup rename failed",
+						Op:      "olextract.write_artifacts",
+						Path:    manifestPath,
+						Offset:  -1,
+						Cause:   err,
+					}
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				rollbackCommitted(committed)
+				return WriteResult{}, &olecfb.OLEError{
+					Code:    olecfb.ErrCommitFailed,
+					Message: "atomic publish manifest stat failed",
+					Op:      "olextract.write_artifacts",
+					Path:    manifestPath,
+					Offset:  -1,
+					Cause:   err,
+				}
+			}
+		}
 		if err := renameFile(stageManifest, manifestPath); err != nil {
-			rollbackWrittenFiles(committed)
+			if manifestBackup != "" {
+				_ = renameFile(manifestBackup, manifestPath)
+			}
+			rollbackCommitted(committed)
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrCommitFailed,
 				Message: "atomic publish manifest rename failed",
@@ -366,6 +426,15 @@ func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.Extra
 		out.ManifestPath = manifestPath
 	}
 	return out, nil
+}
+
+func rollbackCommitted(records []committedRecord) {
+	for i := len(records) - 1; i >= 0; i-- {
+		_ = os.Remove(records[i].file.FilePath)
+		if records[i].backupPath != "" {
+			_ = renameFile(records[i].backupPath, records[i].file.FilePath)
+		}
+	}
 }
 
 func rollbackWrittenFiles(files []WrittenFile) {
