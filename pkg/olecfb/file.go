@@ -54,13 +54,17 @@ func Open(r storage.ReadBackend, opt OpenOptions) (*File, error) {
 	if r == nil {
 		return nil, newError(ErrInvalidArgument, "read backend is nil", "open", "", -1, nil)
 	}
-	hdr, err := parseHeader(r.ReadAt, r.Size())
+	size := r.Size()
+	if opt.MaxTotalBytes > 0 && size > opt.MaxTotalBytes {
+		return nil, newError(ErrQuotaExceeded, "file size exceeds configured MaxTotalBytes", "open", "", -1, nil)
+	}
+	hdr, err := parseHeader(r.ReadAt, size)
 	if err != nil {
 		return nil, err
 	}
 	report := Report{Mode: opt.Mode}
 
-	fat, err := loadFAT(r.ReadAt, r.Size(), hdr)
+	fat, err := loadFAT(r.ReadAt, size, hdr)
 	if err != nil {
 		if opt.Mode == Lenient {
 			report.Partial = true
@@ -70,7 +74,7 @@ func Open(r storage.ReadBackend, opt OpenOptions) (*File, error) {
 			return nil, err
 		}
 	}
-	root, err := parseRootNode(r.ReadAt, r.Size(), hdr)
+	root, err := parseRootNode(r.ReadAt, size, hdr)
 	if err != nil {
 		if opt.Mode == Lenient {
 			report.Partial = true
@@ -86,7 +90,7 @@ func Open(r storage.ReadBackend, opt OpenOptions) (*File, error) {
 		}
 	}
 
-	entries, err := parseDirectoryEntries(r.ReadAt, r.Size(), hdr, fat, opt.MaxChainLength)
+	entries, err := parseDirectoryEntries(r.ReadAt, size, hdr, fat, opt.MaxChainLength)
 	if err != nil {
 		if opt.Mode == Lenient {
 			report.Partial = true
@@ -118,7 +122,7 @@ func Open(r storage.ReadBackend, opt OpenOptions) (*File, error) {
 		}
 	}
 
-	miniFAT, miniData, miniErr := loadMiniData(r.ReadAt, r.Size(), hdr, fat, entryMap, opt.MaxChainLength)
+	miniFAT, miniData, miniErr := loadMiniData(r.ReadAt, size, hdr, fat, entryMap, opt.MaxChainLength)
 	if miniErr != nil {
 		if opt.Mode == Lenient {
 			report.Partial = true

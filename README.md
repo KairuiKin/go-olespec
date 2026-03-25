@@ -22,6 +22,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
   - MiniFAT streams
   - enforce `OpenOptions.MaxStreamBytes` on stream open/read
 - Strict/lenient parsing modes with warning report
+- enforce `OpenOptions.MaxTotalBytes` at open-time
 - Basic extraction report with stream hashing (SHA-256)
 - Recursive extraction for nested OLE streams with `ParentID/Children` graph
 - OLE object detection in extraction (`DetectOLEDS`)

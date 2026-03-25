@@ -539,6 +539,20 @@ func TestOpenBytes_MaxObjectCountLimit(t *testing.T) {
 	}
 }
 
+func TestOpenBytes_MaxTotalBytesLimit(t *testing.T) {
+	buf := buildValidFileWithBranchingTree()
+	_, err := OpenBytes(buf, OpenOptions{
+		Mode:          Strict,
+		MaxTotalBytes: int64(len(buf) - 1),
+	})
+	if err == nil {
+		t.Fatal("expected quota exceeded error")
+	}
+	if !IsCode(err, ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded, got %v", err)
+	}
+}
+
 func buildValidHeader(major uint16) []byte {
 	buf := make([]byte, cfbHeaderSize)
 	copy(buf[0:8], cfbSignature[:])

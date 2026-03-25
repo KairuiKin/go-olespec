@@ -99,15 +99,15 @@ func TestExtract_DeterministicOrder(t *testing.T) {
 	}
 }
 
-func TestExtract_UsesOpenOptionDefaultLimits(t *testing.T) {
+func TestExtract_UsesOpenOptionDefaultStreamLimit(t *testing.T) {
 	base := buildExtractTestFile(t)
 	snap, err := base.SnapshotBytes()
 	if err != nil {
 		t.Fatalf("SnapshotBytes returned error: %v", err)
 	}
 	f, err := OpenBytes(snap, OpenOptions{
-		Mode:          Strict,
-		MaxTotalBytes: 7, // one stream fits (4), second should exceed.
+		Mode:           Strict,
+		MaxStreamBytes: 3, // each stream is 4 bytes; extract should skip due inherited artifact limit.
 	})
 	if err != nil {
 		t.Fatalf("OpenBytes returned error: %v", err)
@@ -117,10 +117,20 @@ func TestExtract_UsesOpenOptionDefaultLimits(t *testing.T) {
 		t.Fatalf("Extract returned error: %v", err)
 	}
 	if !rep.Partial {
-		t.Fatal("expected partial report due to inherited max total bytes")
+		t.Fatal("expected partial report due to inherited max stream bytes")
 	}
-	if rep.Stats.BytesExported > 7 {
-		t.Fatalf("unexpected exported bytes: %d", rep.Stats.BytesExported)
+	if rep.Stats.ArtifactsTotal != 0 {
+		t.Fatalf("expected zero artifacts due to size skip, got %d", rep.Stats.ArtifactsTotal)
+	}
+	foundLimit := false
+	for _, w := range rep.Warnings {
+		if w.Code == ErrLimitExceeded {
+			foundLimit = true
+			break
+		}
+	}
+	if !foundLimit {
+		t.Fatal("expected limit exceeded warning")
 	}
 }
 
