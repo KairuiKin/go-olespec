@@ -133,6 +133,7 @@ items:
       - "integration/write_artifacts_atomic_publish_rename_failure_rollback"
       - "integration/write_artifacts_atomic_publish_overwrite_rename_failure_restore"
       - "integration/extract_file_to_dir"
+      - "integration/corpus_replay_cli"
       - "fuzz/olextract_write_artifacts"
 
   - id: PERF-001

@@ -9,6 +9,13 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - `pkg/oleps`: OLE property set stream parser (minimal)
 - `pkg/oleds`: OLE object stream detection + Ole10Native parser
 - `pkg/olextract`: extraction-oriented convenience facade (`ExtractBackend`/`ExtractBytes`/`ExtractFile`/`ExtractReader`) and artifact write-out helpers (`WriteArtifacts`/`Extract*ToDir`, flat/tree layout + manifest + optional atomic publish)
+- `cmd/corpus-replay`: batch corpus replay CLI for extraction pass/fail and coverage statistics
+
+## Corpus Replay CLI
+
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .doc,.xls,.ppt,.cfb -mode lenient -output ./report.json
+```
 
 ## Implemented so far (`pkg/olecfb`)
 
