@@ -26,7 +26,7 @@ Build a production-grade, spec-driven Go OLE core library that supports reliable
   - Deterministic output verification across platforms.
 - Deliverables:
   - Extended `oleds` parse APIs and compatibility tests.
-  - Corpus replay tool under `cmd/` for batch validation. (initial CLI + baseline/latest diff/gate + file-set/partial gates + error-code regression gates + trend summary + trend gates + auto trend save + auto trend prune 已落地：`cmd/corpus-replay`)
+  - Corpus replay tool under `cmd/` for batch validation. (initial CLI + baseline/latest diff/gate + file-set/partial gates + error-code regression gates + trend summary + trend gates + auto trend save + auto trend prune + report-files policy 已落地：`cmd/corpus-replay`)
   - Structured extraction manifest schema freeze.
 - Exit criteria:
   - Interop pass rate target >= 95% on curated corpus.

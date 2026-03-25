@@ -77,6 +77,61 @@ func TestParseModeInvalid(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportFilesFailed(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-report-files", "failed"}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one failed file entry, got %d", len(rep.Files))
+	}
+	if rep.Files[0].Success {
+		t.Fatal("expected failed-only entries")
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
+func TestRunReplayReportFilesNone(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-report-files", "none"}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 0 {
+		t.Fatalf("expected no file entries, got %d", len(rep.Files))
+	}
+	if rep.Summary.OmittedFiles != rep.Summary.Processed {
+		t.Fatalf("expected all processed files omitted, summary=%+v", rep.Summary)
+	}
+}
+
+func TestRunReplayReportFilesInvalid(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-report-files", "bad"}, &out); err == nil {
+		t.Fatal("expected report-files validation error")
+	}
+}
+
 func TestRunReplayBaselineDiffAndNewlyFailedGate(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.cfb")

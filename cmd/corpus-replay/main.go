@@ -21,6 +21,7 @@ type replayOptions struct {
 	Root            string   `json:"root"`
 	Extensions      []string `json:"extensions"`
 	Mode            string   `json:"mode"`
+	ReportFiles     string   `json:"report_files"`
 	RunID           string   `json:"run_id,omitempty"`
 	BaselineReport  string   `json:"baseline_report,omitempty"`
 	BaselineLatest  bool     `json:"baseline_latest,omitempty"`
@@ -55,15 +56,17 @@ type replayFileResult struct {
 }
 
 type replaySummary struct {
-	ScannedFiles int            `json:"scanned_files"`
-	MatchedFiles int            `json:"matched_files"`
-	Processed    int            `json:"processed"`
-	Success      int            `json:"success"`
-	Failed       int            `json:"failed"`
-	Partial      int            `json:"partial"`
-	PassRate     float64        `json:"pass_rate"`
-	DurationMS   int64          `json:"duration_ms"`
-	ErrorCodes   map[string]int `json:"error_codes,omitempty"`
+	ScannedFiles  int            `json:"scanned_files"`
+	MatchedFiles  int            `json:"matched_files"`
+	Processed     int            `json:"processed"`
+	Success       int            `json:"success"`
+	Failed        int            `json:"failed"`
+	Partial       int            `json:"partial"`
+	ReportedFiles int            `json:"reported_files"`
+	OmittedFiles  int            `json:"omitted_files"`
+	PassRate      float64        `json:"pass_rate"`
+	DurationMS    int64          `json:"duration_ms"`
+	ErrorCodes    map[string]int `json:"error_codes,omitempty"`
 }
 
 type replayReport struct {
@@ -167,6 +170,7 @@ func run(args []string, out io.Writer) error {
 		root                    = fset.String("root", ".", "root directory for corpus files")
 		extCSV                  = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
+		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|none")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
@@ -249,6 +253,10 @@ func run(args []string, out io.Writer) error {
 		return errors.New("max-pass-rate-drop must be <= 1")
 	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
+	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
+	if err != nil {
+		return err
+	}
 
 	mode, err := parseMode(*modeStr)
 	if err != nil {
@@ -288,6 +296,7 @@ func run(args []string, out io.Writer) error {
 		Root:            absRoot,
 		Extensions:      append([]string(nil), extensions...),
 		Mode:            strings.ToLower(*modeStr),
+		ReportFiles:     reportFilesPolicy,
 		RunID:           strings.TrimSpace(*runID),
 		BaselineReport:  baselinePathTrim,
 		BaselineLatest:  *baselineLatest,
@@ -483,6 +492,7 @@ func run(args []string, out io.Writer) error {
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
 	)
+	applyReportFilePolicy(&report, reportFilesPolicy)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -897,6 +907,44 @@ func parseCSVTokens(csv string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+func parseReportFilesPolicy(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "all":
+		return "all", nil
+	case "failed":
+		return "failed", nil
+	case "none":
+		return "none", nil
+	default:
+		return "", fmt.Errorf("invalid report-files %q, expected all|failed|none", v)
+	}
+}
+
+func applyReportFilePolicy(report *replayReport, policy string) {
+	if report == nil {
+		return
+	}
+	total := len(report.Files)
+	switch policy {
+	case "all":
+		// keep all entries
+	case "failed":
+		filtered := make([]replayFileResult, 0, len(report.Files))
+		for _, f := range report.Files {
+			if !f.Success {
+				filtered = append(filtered, f)
+			}
+		}
+		report.Files = filtered
+	case "none":
+		report.Files = nil
+	default:
+		// unreachable if parsed through parseReportFilesPolicy
+	}
+	report.Summary.ReportedFiles = len(report.Files)
+	report.Summary.OmittedFiles = total - len(report.Files)
 }
 
 func normalizeCodes(codes []string) []string {

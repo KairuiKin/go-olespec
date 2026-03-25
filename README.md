@@ -49,6 +49,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/histor
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -baseline-latest -max-newly-failed 0
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)
