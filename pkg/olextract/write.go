@@ -1,6 +1,7 @@
 package olextract
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -238,7 +239,7 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 }
 
 func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.ExtractReport, manifestPath string, skipped int, overwrite bool) (WriteResult, error) {
-	stageDir := filepath.Join(dstDir, ".olespec-stage-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	stageDir := filepath.Join(dstDir, buildStageDirName())
 	if err := os.MkdirAll(stageDir, 0o755); err != nil {
 		return WriteResult{}, &olecfb.OLEError{
 			Code:    olecfb.ErrUnsupported,
@@ -426,6 +427,24 @@ func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.Extra
 		out.ManifestPath = manifestPath
 	}
 	return out, nil
+}
+
+func buildStageDirName() string {
+	return ".olespec-stage-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + randomHex4()
+}
+
+func randomHex4() string {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "0000"
+	}
+	const hex = "0123456789abcdef"
+	out := make([]byte, 4)
+	out[0] = hex[b[0]>>4]
+	out[1] = hex[b[0]&0x0F]
+	out[2] = hex[b[1]>>4]
+	out[3] = hex[b[1]&0x0F]
+	return string(out)
 }
 
 func rollbackCommitted(records []committedRecord) {

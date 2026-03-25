@@ -493,6 +493,20 @@ func TestWriteArtifactsTreeLayoutAvoidsReservedWindowsNames(t *testing.T) {
 	}
 }
 
+func TestBuildStageDirName(t *testing.T) {
+	name := buildStageDirName()
+	if !strings.HasPrefix(name, ".olespec-stage-") {
+		t.Fatalf("unexpected stage dir prefix: %s", name)
+	}
+	parts := strings.Split(name, "-")
+	if len(parts) < 4 {
+		t.Fatalf("unexpected stage dir format: %s", name)
+	}
+	if len(parts[len(parts)-1]) != 4 {
+		t.Fatalf("unexpected random suffix length: %s", name)
+	}
+}
+
 func TestExtractFileToDir(t *testing.T) {
 	buf := buildSampleCFBBytes(t)
 	src := filepath.Join(t.TempDir(), "sample.cfb")
