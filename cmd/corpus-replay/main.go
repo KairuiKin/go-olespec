@@ -140,12 +140,14 @@ type replayGateResult struct {
 	Passed                  bool     `json:"passed"`
 	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
 	MaxFailed               *int     `json:"max_failed,omitempty"`
+	MaxPartial              *int     `json:"max_partial,omitempty"`
 	MaxNewlyFailed          *int     `json:"max_newly_failed,omitempty"`
 	MaxNewFiles             *int     `json:"max_new_files,omitempty"`
 	MaxRemovedFiles         *int     `json:"max_removed_files,omitempty"`
 	MaxNewlyPartial         *int     `json:"max_newly_partial,omitempty"`
 	MaxPassRateDrop         *float64 `json:"max_pass_rate_drop,omitempty"`
 	MaxFailedIncrease       *int     `json:"max_failed_increase,omitempty"`
+	MaxPartialIncrease      *int     `json:"max_partial_increase,omitempty"`
 	DenyErrorCodes          []string `json:"deny_error_codes,omitempty"`
 	MaxNewErrorCodes        *int     `json:"max_new_error_codes,omitempty"`
 	MaxErrorCodeRegressions *int     `json:"max_error_code_regressions,omitempty"`
@@ -190,12 +192,14 @@ func run(args []string, out io.Writer) error {
 		maxArtifactSize         = fset.Int64("max-artifact-size", 32<<20, "max single artifact size in bytes")
 		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
 		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
+		maxPartial              = fset.Int("max-partial", -1, "gate: maximum allowed partial files, negative disables")
 		maxNewlyFailed          = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
 		maxNewFiles             = fset.Int("max-new-files", -1, "gate: maximum allowed new files vs baseline, negative disables")
 		maxRemovedFiles         = fset.Int("max-removed-files", -1, "gate: maximum allowed removed files vs baseline, negative disables")
 		maxNewlyPartial         = fset.Int("max-newly-partial", -1, "gate: maximum allowed newly partial files vs baseline, negative disables")
 		maxPassRateDrop         = fset.Float64("max-pass-rate-drop", -1, "gate: maximum allowed pass-rate drop vs latest trend point in [0,1], negative disables")
 		maxFailedIncrease       = fset.Int("max-failed-increase", -1, "gate: maximum allowed failed-files increase vs latest trend point, negative disables")
+		maxPartialIncrease      = fset.Int("max-partial-increase", -1, "gate: maximum allowed partial-files increase vs latest trend point, negative disables")
 		denyErrorCodes          = fset.String("deny-error-codes", "", "gate: comma-separated error codes that must not appear")
 		maxNewErrorCodes        = fset.Int("max-new-error-codes", -1, "gate: maximum allowed new error codes vs baseline, negative disables")
 		maxErrorCodeRegressions = fset.Int("max-error-code-regressions", -1, "gate: maximum allowed error codes with increased failure count vs baseline, negative disables")
@@ -236,6 +240,9 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxFailedIncrease >= 0 && trendDirTrim == "" {
 		return errors.New("max-failed-increase requires -trend-dir")
+	}
+	if *maxPartialIncrease >= 0 && trendDirTrim == "" {
+		return errors.New("max-partial-increase requires -trend-dir")
 	}
 	if *saveTrend && trendDirTrim == "" {
 		return errors.New("save-trend requires -trend-dir")
@@ -438,6 +445,11 @@ func run(args []string, out io.Writer) error {
 		v := *maxFailed
 		maxFailedPtr = &v
 	}
+	var maxPartialPtr *int
+	if *maxPartial >= 0 {
+		v := *maxPartial
+		maxPartialPtr = &v
+	}
 	var maxNewlyFailedPtr *int
 	if *maxNewlyFailed >= 0 {
 		v := *maxNewlyFailed
@@ -468,6 +480,11 @@ func run(args []string, out io.Writer) error {
 		v := *maxFailedIncrease
 		maxFailedIncreasePtr = &v
 	}
+	var maxPartialIncreasePtr *int
+	if *maxPartialIncrease >= 0 {
+		v := *maxPartialIncrease
+		maxPartialIncreasePtr = &v
+	}
 	var maxNewErrorCodesPtr *int
 	if *maxNewErrorCodes >= 0 {
 		v := *maxNewErrorCodes
@@ -482,12 +499,14 @@ func run(args []string, out io.Writer) error {
 		&report,
 		minPassRatePtr,
 		maxFailedPtr,
+		maxPartialPtr,
 		maxNewlyFailedPtr,
 		maxNewFilesPtr,
 		maxRemovedFilesPtr,
 		maxNewlyPartialPtr,
 		maxPassRateDropPtr,
 		maxFailedIncreasePtr,
+		maxPartialIncreasePtr,
 		denyCodes,
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
@@ -747,12 +766,14 @@ func evaluateGates(
 	report *replayReport,
 	minPassRate *float64,
 	maxFailed *int,
+	maxPartial *int,
 	maxNewlyFailed *int,
 	maxNewFiles *int,
 	maxRemovedFiles *int,
 	maxNewlyPartial *int,
 	maxPassRateDrop *float64,
 	maxFailedIncrease *int,
+	maxPartialIncrease *int,
 	denyErrorCodes []string,
 	maxNewErrorCodes *int,
 	maxErrorCodeRegressions *int,
@@ -762,16 +783,18 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minPassRate != nil || maxFailed != nil || maxPartial != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinPassRate:             minPassRate,
 		MaxFailed:               maxFailed,
+		MaxPartial:              maxPartial,
 		MaxNewlyFailed:          maxNewlyFailed,
 		MaxNewFiles:             maxNewFiles,
 		MaxRemovedFiles:         maxRemovedFiles,
 		MaxNewlyPartial:         maxNewlyPartial,
 		MaxPassRateDrop:         maxPassRateDrop,
 		MaxFailedIncrease:       maxFailedIncrease,
+		MaxPartialIncrease:      maxPartialIncrease,
 		DenyErrorCodes:          denyErrorCodes,
 		MaxNewErrorCodes:        maxNewErrorCodes,
 		MaxErrorCodeRegressions: maxErrorCodeRegressions,
@@ -787,6 +810,10 @@ func evaluateGates(
 	if maxFailed != nil && report.Summary.Failed > *maxFailed {
 		report.Gate.Failures = append(report.Gate.Failures,
 			fmt.Sprintf("failed %d > max_failed %d", report.Summary.Failed, *maxFailed))
+	}
+	if maxPartial != nil && report.Summary.Partial > *maxPartial {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("partial %d > max_partial %d", report.Summary.Partial, *maxPartial))
 	}
 	if maxNewlyFailed != nil {
 		if report.Baseline == nil {
@@ -837,6 +864,14 @@ func evaluateGates(
 		} else if report.Trend.LatestDelta.DeltaFailed > *maxFailedIncrease {
 			report.Gate.Failures = append(report.Gate.Failures,
 				fmt.Sprintf("failed_increase %d > max_failed_increase %d", report.Trend.LatestDelta.DeltaFailed, *maxFailedIncrease))
+		}
+	}
+	if maxPartialIncrease != nil {
+		if report.Trend == nil || report.Trend.LatestDelta == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_partial_increase gate requires trend latest delta")
+		} else if report.Trend.LatestDelta.DeltaPartial > *maxPartialIncrease {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("partial_increase %d > max_partial_increase %d", report.Trend.LatestDelta.DeltaPartial, *maxPartialIncrease))
 		}
 	}
 	for _, code := range denyErrorCodes {
