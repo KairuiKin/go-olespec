@@ -161,7 +161,7 @@ type StreamReader interface {
 
 `ExtractOptions` 追加字段：
 
-- `UnwrapOle10Native bool`：开启后会解析 `Ole10Native` 流并把内嵌 payload 作为子 artifact 继续提取（含嵌套 OLE 递归）。
+- `UnwrapOle10Native bool`：开启后会解析 `Ole10Native` 流并把内嵌 payload 作为子 artifact 继续提取（支持 `Ole10Native` 递归解包和嵌套 OLE 递归，受 `Limits.MaxDepth` 限制）。
 
 ## 6. Error Contract
 

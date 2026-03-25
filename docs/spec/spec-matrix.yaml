@@ -104,6 +104,8 @@ items:
       - "integration/extract_artifact_limit"
       - "integration/extract_deterministic"
       - "integration/extract_unwrap_ole10native"
+      - "integration/extract_unwrap_ole10native_recursive"
+      - "integration/extract_unwrap_ole10native_depth_limit"
 
   - id: EXTRACT-IO-001
     section: "Extraction write-out"

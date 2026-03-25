@@ -385,6 +385,87 @@ func TestExtract_UnwrapOle10NativeDisabled(t *testing.T) {
 	}
 }
 
+func TestExtract_UnwrapOle10NativeRecursive(t *testing.T) {
+	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
+	level2 := buildOle10NativeBytes("level2.bin", "C:\\level2.bin", innerBytes)
+	level1 := buildOle10NativeBytes("level1.bin", "C:\\level1.bin", level2)
+	fileBytes := buildValidV4FileWithBigNamedStream("\x01Ole10Native", level1)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{
+		Deduplicate:       false,
+		DetectOLEDS:       true,
+		UnwrapOle10Native: true,
+		Limits:            ExtractLimits{MaxDepth: 8},
+	})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+
+	var l1, l2, leaf *Artifact
+	for i := range rep.Artifacts {
+		a := &rep.Artifacts[i]
+		switch a.Path {
+		case "/\x01Ole10Native!$ole10native":
+			l1 = a
+		case "/\x01Ole10Native!$ole10native!$ole10native":
+			l2 = a
+		case "/\x01Ole10Native!$ole10native!$ole10native!/Blob":
+			leaf = a
+		}
+	}
+	if l1 == nil || l2 == nil || leaf == nil {
+		t.Fatal("expected recursive Ole10Native unwrap chain with nested OLE leaf")
+	}
+	if l2.ParentID != l1.ID {
+		t.Fatalf("unexpected level2 parent id: got %q want %q", l2.ParentID, l1.ID)
+	}
+	if leaf.ParentID != l2.ID {
+		t.Fatalf("unexpected leaf parent id: got %q want %q", leaf.ParentID, l2.ID)
+	}
+}
+
+func TestExtract_UnwrapOle10NativeDepthLimit(t *testing.T) {
+	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
+	level2 := buildOle10NativeBytes("level2.bin", "C:\\level2.bin", innerBytes)
+	level1 := buildOle10NativeBytes("level1.bin", "C:\\level1.bin", level2)
+	fileBytes := buildValidV4FileWithBigNamedStream("\x01Ole10Native", level1)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{
+		Deduplicate:       false,
+		DetectOLEDS:       true,
+		UnwrapOle10Native: true,
+		Limits:            ExtractLimits{MaxDepth: 1},
+	})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	foundLevel2 := false
+	foundDepthWarning := false
+	for _, a := range rep.Artifacts {
+		if a.Path == "/\x01Ole10Native!$ole10native!$ole10native" {
+			foundLevel2 = true
+		}
+	}
+	for _, w := range rep.Warnings {
+		if w.Code == ErrDepthExceeded {
+			foundDepthWarning = true
+			break
+		}
+	}
+	if foundLevel2 {
+		t.Fatal("unexpected level2 unwrapped artifact with MaxDepth=1")
+	}
+	if !foundDepthWarning {
+		t.Fatal("expected depth exceeded warning for recursive Ole10Native unwrap")
+	}
+}
+
 func TestExtract_DetectImages(t *testing.T) {
 	pngPrefix := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	fileBytes, _ := buildValidV4FileWithNamedStream("Image1", pngPrefix)

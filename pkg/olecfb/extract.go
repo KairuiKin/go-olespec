@@ -273,6 +273,18 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 }
 
 func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, streamPayload []byte, depth int) {
+	if w.maxDepth > 0 && depth >= w.maxDepth {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrDepthExceeded,
+			Message:  "extract depth limit reached",
+			Path:     parent.Path,
+			Offset:   -1,
+			Op:       "extract.unwrap_ole10native",
+			Severity: SeverityWarning,
+		})
+		return
+	}
 	native, ok := oleds.ParseOle10Native(streamPayload)
 	if !ok {
 		w.report.Partial = true
@@ -352,8 +364,12 @@ func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, str
 			artifact.MediaType = media
 		}
 	}
+	var oledsDetection oleds.Detection
+	if w.opt.DetectOLEDS || w.opt.UnwrapOle10Native {
+		oledsDetection = oleds.Detect(embeddedPath, head)
+	}
 	if w.opt.DetectOLEDS {
-		d := oleds.Detect(embeddedPath, head)
+		d := oledsDetection
 		switch d.Kind {
 		case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
 			artifact.Kind = ArtifactOleObj
@@ -389,6 +405,9 @@ func (w *extractWalker) walkOle10NativePayload(source Node, parent Artifact, str
 	}
 	w.totalBytes += artifact.Size
 	w.appendArtifact(artifact)
+	if w.opt.UnwrapOle10Native && oledsDetection.Kind == oleds.KindOle10Native && !w.stop {
+		w.walkOle10NativePayload(source, artifact, native.Payload, artifact.Depth)
+	}
 	if !isOLE || w.stop {
 		return
 	}
