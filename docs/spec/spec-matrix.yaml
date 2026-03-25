@@ -95,3 +95,5 @@ items:
       - "integration/extract_depth_limit"
       - "integration/extract_size_limit"
       - "integration/extract_dedup"
+      - "integration/extract_artifact_limit"
+      - "integration/extract_deterministic"
