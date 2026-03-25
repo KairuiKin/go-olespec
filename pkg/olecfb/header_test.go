@@ -302,6 +302,40 @@ func TestExtract_DetectImages(t *testing.T) {
 	}
 }
 
+func TestExtract_IncludeRaw(t *testing.T) {
+	fileBytes, payload := buildValidV4FileWithSingleNormalStream()
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+
+	rep, err := f.Extract(ExtractOptions{IncludeRaw: false})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	if len(rep.Artifacts) != 1 {
+		t.Fatalf("unexpected artifact count: %d", len(rep.Artifacts))
+	}
+	if rep.Artifacts[0].Raw != nil {
+		t.Fatal("raw bytes should be nil when IncludeRaw=false")
+	}
+
+	rep2, err := f.Extract(ExtractOptions{IncludeRaw: true})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	if len(rep2.Artifacts) != 1 {
+		t.Fatalf("unexpected artifact count: %d", len(rep2.Artifacts))
+	}
+	raw := rep2.Artifacts[0].Raw
+	if len(raw) != len(payload) {
+		t.Fatalf("unexpected raw length: got %d want %d", len(raw), len(payload))
+	}
+	if !reflect.DeepEqual(raw, payload) {
+		t.Fatal("unexpected raw payload")
+	}
+}
+
 func TestExtract_RecursiveNestedOLE(t *testing.T) {
 	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
 	outerBytes := buildValidV4FileWithBigNamedStream("Embedded", innerBytes)

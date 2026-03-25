@@ -87,6 +87,10 @@ type StreamReader interface {
 }
 ```
 
+`Artifact` 新增可选字段：
+
+- `Raw []byte`: 当 `ExtractOptions.IncludeRaw=true` 时填充原始流字节；默认 `nil`
+
 `CommitResult` 字段：
 
 - `BytesWritten`: 本次提交写入字节数

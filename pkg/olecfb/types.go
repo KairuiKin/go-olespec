@@ -208,6 +208,7 @@ type Artifact struct {
 	MediaType    string
 	Size         int64
 	SHA256       string
+	Raw          []byte
 	Depth        int
 	ParentID     string
 	Children     int

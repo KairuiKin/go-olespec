@@ -197,6 +197,19 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 		w.stop = true
 		return
 	}
+	needsPayload := w.opt.IncludeRaw || isOLE
+	var payload []byte
+	if needsPayload {
+		payload, err = readStreamAll(file, n.Path, w.maxArtifactSize)
+		if err != nil {
+			w.report.Partial = true
+			w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+			return
+		}
+		if w.opt.IncludeRaw {
+			artifact.Raw = append([]byte(nil), payload...)
+		}
+	}
 
 	w.totalBytes += artifact.Size
 	w.appendArtifact(artifact)
@@ -217,11 +230,13 @@ func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID stri
 		return
 	}
 
-	payload, err := readStreamAll(file, n.Path, w.maxArtifactSize)
-	if err != nil {
-		w.report.Partial = true
-		w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
-		return
+	if payload == nil {
+		payload, err = readStreamAll(file, n.Path, w.maxArtifactSize)
+		if err != nil {
+			w.report.Partial = true
+			w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+			return
+		}
 	}
 	nested, err := OpenBytes(payload, w.openOpt)
 	if err != nil {
