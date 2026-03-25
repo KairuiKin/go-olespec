@@ -25,6 +25,8 @@ type replayOptions struct {
 	BaselineReport  string   `json:"baseline_report,omitempty"`
 	TrendDir        string   `json:"trend_dir,omitempty"`
 	TrendLimit      int      `json:"trend_limit,omitempty"`
+	SaveTrend       bool     `json:"save_trend,omitempty"`
+	SaveTrendName   string   `json:"save_trend_name,omitempty"`
 	IncludeRaw      bool     `json:"include_raw"`
 	DetectImages    bool     `json:"detect_images"`
 	DetectOLEDS     bool     `json:"detect_oleds"`
@@ -164,6 +166,8 @@ func run(args []string, out io.Writer) error {
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
 		trendDir                = fset.String("trend-dir", "", "directory containing historical replay report JSON files for trend summary")
 		trendLimit              = fset.Int("trend-limit", 20, "max historical points to keep for trend, <=0 means unlimited")
+		saveTrend               = fset.Bool("save-trend", false, "save current replay report JSON into trend-dir")
+		saveTrendName           = fset.String("save-trend-name", "", "optional trend report file name when save-trend is enabled")
 		includeRaw              = fset.Bool("include-raw", false, "include raw artifact payloads in extraction")
 		detectImages            = fset.Bool("detect-images", true, "enable image signature detection")
 		detectOLEDS             = fset.Bool("detect-oleds", true, "enable OLEDS stream detection")
@@ -200,6 +204,9 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxFailedIncrease >= 0 && strings.TrimSpace(*trendDir) == "" {
 		return errors.New("max-failed-increase requires -trend-dir")
+	}
+	if *saveTrend && strings.TrimSpace(*trendDir) == "" {
+		return errors.New("save-trend requires -trend-dir")
 	}
 	if *minPassRate > 1 {
 		return errors.New("min-pass-rate must be <= 1")
@@ -251,6 +258,8 @@ func run(args []string, out io.Writer) error {
 		BaselineReport:  strings.TrimSpace(*baselinePath),
 		TrendDir:        strings.TrimSpace(*trendDir),
 		TrendLimit:      *trendLimit,
+		SaveTrend:       *saveTrend,
+		SaveTrendName:   strings.TrimSpace(*saveTrendName),
 		IncludeRaw:      *includeRaw,
 		DetectImages:    *detectImages,
 		DetectOLEDS:     *detectOLEDS,
@@ -418,6 +427,11 @@ func run(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if *saveTrend {
+			if _, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf); saveErr != nil {
+				return saveErr
+			}
+		}
 		return gateErr
 	}
 
@@ -430,6 +444,11 @@ func run(args []string, out io.Writer) error {
 	}
 	if err := os.WriteFile(outAbs, buf, 0o644); err != nil {
 		return err
+	}
+	if *saveTrend {
+		if _, saveErr := saveTrendReport(strings.TrimSpace(*trendDir), strings.TrimSpace(*saveTrendName), strings.TrimSpace(*runID), buf); saveErr != nil {
+			return saveErr
+		}
 	}
 	return gateErr
 }
@@ -781,6 +800,19 @@ func buildTrend(dir string, limit int, current replayReport) (*replayTrend, erro
 	if err != nil {
 		return nil, err
 	}
+	if info, statErr := os.Stat(absDir); statErr != nil {
+		if errors.Is(statErr, os.ErrNotExist) {
+			point := reportToTrendPoint(current, "current")
+			return &replayTrend{
+				SourceDir:   absDir,
+				Points:      []replayTrendPoint{point},
+				LatestDelta: nil,
+			}, nil
+		}
+		return nil, statErr
+	} else if !info.IsDir() {
+		return nil, fmt.Errorf("trend-dir is not a directory: %s", absDir)
+	}
 	entries := make([]trendEntry, 0, 32)
 	err = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -879,6 +911,61 @@ func reportToTrendPoint(rep replayReport, reportPath string) replayTrendPoint {
 		Partial:     rep.Summary.Partial,
 		PassRate:    rep.Summary.PassRate,
 	}
+}
+
+func saveTrendReport(dir, name, runID string, buf []byte) (string, error) {
+	absDir, err := filepath.Abs(strings.TrimSpace(dir))
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(absDir, 0o755); err != nil {
+		return "", err
+	}
+	fileName := strings.TrimSpace(name)
+	if fileName == "" {
+		fileName = buildTrendFileName(runID)
+	}
+	fileName = filepath.Base(fileName)
+	if strings.TrimSpace(fileName) == "" || fileName == "." || fileName == ".." {
+		return "", errors.New("invalid save-trend-name")
+	}
+	if !strings.HasSuffix(strings.ToLower(fileName), ".json") {
+		fileName += ".json"
+	}
+	path := filepath.Join(absDir, fileName)
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func buildTrendFileName(runID string) string {
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	run := sanitizeFileToken(runID)
+	if run == "" {
+		return "replay-" + stamp + ".json"
+	}
+	return "replay-" + stamp + "-" + run + ".json"
+}
+
+func sanitizeFileToken(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range v {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	out := strings.Trim(b.String(), "._- ")
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
 }
 
 func matchesExt(path string, exts []string) bool {

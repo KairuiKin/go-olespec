@@ -33,6 +33,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -run-id $(git rev-parse --s
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -max-pass-rate-drop 0.02 -max-failed-increase 0
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -run-id $(git rev-parse --short HEAD) -save-trend
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)

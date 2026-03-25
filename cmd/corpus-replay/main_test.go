@@ -395,6 +395,70 @@ func TestRunReplayTrendGatesRequireTrendDir(t *testing.T) {
 	}
 }
 
+func TestRunReplaySaveTrend(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-trend-dir", history,
+		"-run-id", "abc",
+		"-save-trend",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(history, "*.json"))
+	if err != nil {
+		t.Fatalf("Glob returned error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected one saved trend file, got %d", len(files))
+	}
+	buf, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(buf, &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Options.RunID != "abc" {
+		t.Fatalf("unexpected run id: %s", rep.Options.RunID)
+	}
+}
+
+func TestRunReplaySaveTrendCustomName(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-trend-dir", history,
+		"-save-trend",
+		"-save-trend-name", "custom-report",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(history, "custom-report.json")); err != nil {
+		t.Fatalf("expected custom saved report: %v", err)
+	}
+}
+
+func TestRunReplaySaveTrendRequiresTrendDir(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-save-trend"}, &out); err == nil {
+		t.Fatal("expected save-trend validation error")
+	}
+}
+
 func buildSampleCFB(t *testing.T) []byte {
 	t.Helper()
 	f, err := olecfb.CreateInMemory(olecfb.CreateOptions{})
