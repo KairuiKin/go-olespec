@@ -91,6 +91,7 @@ items:
       - "unit/oleds_detect_compobj"
       - "unit/oleds_detect_package"
       - "unit/oleds_parse_ole10native"
+      - "fuzz/oleds_parse_ole10native"
 
   - id: EXTRACT-001
     section: "Recursive extraction"
@@ -106,6 +107,7 @@ items:
       - "integration/extract_unwrap_ole10native"
       - "integration/extract_unwrap_ole10native_recursive"
       - "integration/extract_unwrap_ole10native_depth_limit"
+      - "fuzz/olecfb_extract"
 
   - id: EXTRACT-IO-001
     section: "Extraction write-out"
@@ -131,6 +133,7 @@ items:
       - "integration/write_artifacts_atomic_publish_rename_failure_rollback"
       - "integration/write_artifacts_atomic_publish_overwrite_rename_failure_restore"
       - "integration/extract_file_to_dir"
+      - "fuzz/olextract_write_artifacts"
 
   - id: PERF-001
     section: "Performance baseline"
