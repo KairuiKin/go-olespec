@@ -34,5 +34,5 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - Transaction (v1):
   - `CreateStorage` / `PutStream` / `Delete` / `Rename` / `Commit` / `Revert`
   - `Commit` uses `FullRewrite` serializer and writes back to mem/file backend
-  - `CommitOptions{Strategy: Incremental}` supports in-place updates for existing streams with unchanged size
+  - `CommitOptions{Strategy: Incremental}` supports in-place updates for a single existing stream with unchanged size
   - other incremental cases transparently fallback to `FullRewrite`

@@ -795,6 +795,9 @@ func (tx *Tx) commitIncremental(ctx context.Context, opt CommitOptions) (*Commit
 		return nil, newError(ErrUnsupported, "incremental commit requires unchanged topology", "tx.commit_incremental", "", -1, nil)
 	}
 	ids := tx.sortedTouchedStreamIDs()
+	if len(ids) > 1 {
+		return nil, newError(ErrUnsupported, "incremental commit supports single-stream update only", "tx.commit_incremental", "", -1, nil)
+	}
 	for _, id := range ids {
 		data, ok := tx.streamData[id]
 		if !ok {

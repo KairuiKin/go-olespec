@@ -475,3 +475,60 @@ func TestTxCommitIncrementalMiniStreamUpdate(t *testing.T) {
 		t.Fatal("unexpected mini stream payload after reopen")
 	}
 }
+
+func TestTxCommitIncrementalMultipleStreamsFallback(t *testing.T) {
+	f, err := CreateInMemory(CreateOptions{})
+	if err != nil {
+		t.Fatalf("CreateInMemory returned error: %v", err)
+	}
+	tx, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if err := tx.PutStream("/A", bytes.NewReader([]byte("1111")), 4); err != nil {
+		t.Fatalf("PutStream /A returned error: %v", err)
+	}
+	if err := tx.PutStream("/B", bytes.NewReader([]byte("2222")), 4); err != nil {
+		t.Fatalf("PutStream /B returned error: %v", err)
+	}
+	if _, err := tx.Commit(nil, CommitOptions{}); err != nil {
+		t.Fatalf("seed commit returned error: %v", err)
+	}
+
+	tx2, err := f.Begin(TxOptions{})
+	if err != nil {
+		t.Fatalf("Begin returned error: %v", err)
+	}
+	if err := tx2.PutStream("/A", bytes.NewReader([]byte("aaaa")), 4); err != nil {
+		t.Fatalf("PutStream /A returned error: %v", err)
+	}
+	if err := tx2.PutStream("/B", bytes.NewReader([]byte("bbbb")), 4); err != nil {
+		t.Fatalf("PutStream /B returned error: %v", err)
+	}
+	res, err := tx2.Commit(nil, CommitOptions{Strategy: Incremental})
+	if err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	if res.StrategyUsed != FullRewrite {
+		t.Fatalf("expected fallback FullRewrite, got %v", res.StrategyUsed)
+	}
+
+	assertStreamEquals(t, f, "/A", "aaaa")
+	assertStreamEquals(t, f, "/B", "bbbb")
+}
+
+func assertStreamEquals(t *testing.T, f *File, path, want string) {
+	t.Helper()
+	sr, err := f.OpenStream(path)
+	if err != nil {
+		t.Fatalf("OpenStream(%s) returned error: %v", path, err)
+	}
+	defer sr.Close()
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(sr, got); err != nil {
+		t.Fatalf("ReadFull(%s) returned error: %v", path, err)
+	}
+	if string(got) != want {
+		t.Fatalf("unexpected payload for %s: got %q want %q", path, string(got), want)
+	}
+}
