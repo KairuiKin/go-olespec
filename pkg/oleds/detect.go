@@ -26,6 +26,13 @@ type Detection struct {
 	Confidence  float64
 }
 
+type Ole10Native struct {
+	FileName   string
+	SourcePath string
+	TempPath   string
+	Payload    []byte
+}
+
 func Detect(streamPath string, data []byte) Detection {
 	base := strings.ToLower(path.Base(streamPath))
 	switch base {
@@ -60,44 +67,66 @@ func Detect(streamPath string, data []byte) Detection {
 }
 
 func parseOle10Native(data []byte) (Detection, bool) {
-	// Heuristic parser for Ole10Native stream:
-	// [0:4] total size, [4:6] unknown, then 3 ANSI C strings, then [4] payload size, payload bytes.
-	if len(data) < 16 {
-		return Detection{}, false
-	}
-	total := binary.LittleEndian.Uint32(data[0:4])
-	if total == 0 {
-		return Detection{}, false
-	}
-	off := 6
-	fileName, n, ok := readCString(data, off)
+	native, ok := parseOle10NativePayload(data, false)
 	if !ok {
-		return Detection{}, false
-	}
-	off += n
-	sourcePath, n, ok := readCString(data, off)
-	if !ok {
-		return Detection{}, false
-	}
-	off += n
-	_, n, ok = readCString(data, off)
-	if !ok {
-		return Detection{}, false
-	}
-	off += n
-	if off+4 > len(data) {
-		return Detection{}, false
-	}
-	payloadSize := binary.LittleEndian.Uint32(data[off : off+4])
-	off += 4
-	if payloadSize > uint32(len(data)-off) {
 		return Detection{}, false
 	}
 	return Detection{
 		Kind:        KindOle10Native,
+		FileName:    native.FileName,
+		SourcePath:  native.SourcePath,
+		PayloadSize: uint32(len(native.Payload)),
+	}, true
+}
+
+// ParseOle10Native parses an Ole10Native stream and returns metadata with payload.
+func ParseOle10Native(data []byte) (Ole10Native, bool) {
+	return parseOle10NativePayload(data, true)
+}
+
+func parseOle10NativePayload(data []byte, copyPayload bool) (Ole10Native, bool) {
+	// Heuristic parser for Ole10Native stream:
+	// [0:4] total size, [4:6] unknown, then 3 ANSI C strings, then [4] payload size, payload bytes.
+	if len(data) < 16 {
+		return Ole10Native{}, false
+	}
+	total := binary.LittleEndian.Uint32(data[0:4])
+	if total == 0 {
+		return Ole10Native{}, false
+	}
+	off := 6
+	fileName, n, ok := readCString(data, off)
+	if !ok {
+		return Ole10Native{}, false
+	}
+	off += n
+	sourcePath, n, ok := readCString(data, off)
+	if !ok {
+		return Ole10Native{}, false
+	}
+	off += n
+	tempPath, n, ok := readCString(data, off)
+	if !ok {
+		return Ole10Native{}, false
+	}
+	off += n
+	if off+4 > len(data) {
+		return Ole10Native{}, false
+	}
+	payloadSize := binary.LittleEndian.Uint32(data[off : off+4])
+	off += 4
+	if payloadSize > uint32(len(data)-off) {
+		return Ole10Native{}, false
+	}
+	payload := data[off : off+int(payloadSize)]
+	if copyPayload {
+		payload = append([]byte(nil), payload...)
+	}
+	return Ole10Native{
 		FileName:    fileName,
 		SourcePath:  sourcePath,
-		PayloadSize: payloadSize,
+		TempPath:    tempPath,
+		Payload:     payload,
 	}, true
 }
 

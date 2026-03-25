@@ -38,6 +38,29 @@ func TestDetectPackageByPath(t *testing.T) {
 	}
 }
 
+func TestParseOle10Native(t *testing.T) {
+	data := buildOle10Native("hello.txt", "C:\\tmp\\hello.txt", []byte("hello"))
+	n, ok := ParseOle10Native(data)
+	if !ok {
+		t.Fatal("expected ParseOle10Native success")
+	}
+	if n.FileName != "hello.txt" {
+		t.Fatalf("unexpected file name: %q", n.FileName)
+	}
+	if n.SourcePath != "C:\\tmp\\hello.txt" {
+		t.Fatalf("unexpected source path: %q", n.SourcePath)
+	}
+	if string(n.Payload) != "hello" {
+		t.Fatalf("unexpected payload: %q", string(n.Payload))
+	}
+}
+
+func TestParseOle10NativeInvalid(t *testing.T) {
+	if _, ok := ParseOle10Native([]byte("broken")); ok {
+		t.Fatal("expected ParseOle10Native failure")
+	}
+}
+
 func buildOle10Native(fileName, sourcePath string, payload []byte) []byte {
 	var body bytes.Buffer
 	body.Write([]byte{0x02, 0x00}) // unknown short

@@ -51,6 +51,20 @@ func ExtractReader(r io.Reader, openOpt olecfb.OpenOptions, extractOpt olecfb.Ex
 - 始终在返回前关闭 `ReadBackend`。
 - `rb=nil` 返回 `INVALID_ARGUMENT`。
 
+`oleds` 基础解析 API：
+
+```go
+type Ole10Native struct {
+    FileName   string
+    SourcePath string
+    TempPath   string
+    Payload    []byte
+}
+
+func Detect(streamPath string, data []byte) Detection
+func ParseOle10Native(data []byte) (Ole10Native, bool)
+```
+
 `Open` 配额行为：
 
 - `OpenOptions.MaxTotalBytes > 0` 时，若容器大小超限，`Open` 直接返回 `QUOTA_EXCEEDED`

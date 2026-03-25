@@ -90,6 +90,7 @@ items:
       - "unit/oleds_detect_ole10native"
       - "unit/oleds_detect_compobj"
       - "unit/oleds_detect_package"
+      - "unit/oleds_parse_ole10native"
 
   - id: EXTRACT-001
     section: "Recursive extraction"
