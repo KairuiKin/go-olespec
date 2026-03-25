@@ -49,6 +49,9 @@ func (f *File) WalkEx(opt WalkOptions, fn func(WalkEvent) error) (WalkResult, er
 func (f *File) OpenStream(path string) (StreamReader, error)
 func (f *File) SnapshotBytes() ([]byte, error) // only mem backend
 func (f *File) Close() error
+func (f *File) OpenPropertySet(path string) (*oleps.Stream, error)
+func (f *File) OpenSummaryInformation() (*oleps.PropertySet, error)
+func (f *File) OpenDocumentSummaryInformation() (*oleps.PropertySet, error)
 
 func (tx *Tx) PutStream(path string, r io.Reader, size int64) error
 func (tx *Tx) Delete(path string) error

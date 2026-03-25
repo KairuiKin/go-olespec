@@ -225,6 +225,26 @@ func TestOpenPropertySet_SummaryInformation(t *testing.T) {
 	}
 }
 
+func TestOpenPropertySet_DocumentSummaryInformation(t *testing.T) {
+	ps := buildDocumentSummaryPropertySetStreamBytes("Doc Author")
+	fileBytes, _ := buildValidV4FileWithNamedStream("\x05DocumentSummaryInformation", ps)
+	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	set, err := f.OpenDocumentSummaryInformation()
+	if err != nil {
+		t.Fatalf("OpenDocumentSummaryInformation returned error: %v", err)
+	}
+	author, ok := set.GetString(oleps.PIDAuthor)
+	if !ok {
+		t.Fatal("author property not found")
+	}
+	if author != "Doc Author" {
+		t.Fatalf("unexpected author: %q", author)
+	}
+}
+
 func TestExtract_FromV4Stream(t *testing.T) {
 	fileBytes, payload := buildValidV4FileWithSingleNormalStream()
 	f, err := OpenBytes(fileBytes, OpenOptions{Mode: Strict})
@@ -755,6 +775,33 @@ func buildSummaryPropertySetStreamBytes(title string, pageCount int32) []byte {
 	binary.LittleEndian.PutUint32(section[20:24], offPages)
 	copy(section[offTitle:], valTitle)
 	copy(section[offPages:], valPages)
+
+	return append(header, section...)
+}
+
+func buildDocumentSummaryPropertySetStreamBytes(author string) []byte {
+	headerSize := 28 + 20
+	header := make([]byte, headerSize)
+	binary.LittleEndian.PutUint16(header[0:2], 0xFFFE)
+	binary.LittleEndian.PutUint16(header[2:4], 0x0000)
+	binary.LittleEndian.PutUint32(header[24:28], 1)
+	copy(header[28:44], oleps.FMTIDDocumentSummaryInformation[:])
+	binary.LittleEndian.PutUint32(header[44:48], uint32(headerSize))
+
+	authorUTF16 := utf16LE(author + "\x00")
+	valAuthor := make([]byte, 8+len(authorUTF16))
+	binary.LittleEndian.PutUint16(valAuthor[0:2], uint16(oleps.VTLPWSTR))
+	binary.LittleEndian.PutUint32(valAuthor[4:8], uint32(len(author)+1))
+	copy(valAuthor[8:], authorUTF16)
+
+	offAuthor := uint32(16)
+	sectionSize := int(offAuthor) + len(valAuthor)
+	section := make([]byte, sectionSize)
+	binary.LittleEndian.PutUint32(section[0:4], uint32(sectionSize))
+	binary.LittleEndian.PutUint32(section[4:8], 1)
+	binary.LittleEndian.PutUint32(section[8:12], oleps.PIDAuthor)
+	binary.LittleEndian.PutUint32(section[12:16], offAuthor)
+	copy(section[offAuthor:], valAuthor)
 
 	return append(header, section...)
 }

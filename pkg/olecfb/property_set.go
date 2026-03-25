@@ -52,3 +52,29 @@ func (f *File) OpenSummaryInformation() (*oleps.PropertySet, error) {
 	}
 	return nil, newError(ErrNotFound, "summary information not found", "property.summary", "", -1, lastErr)
 }
+
+func (f *File) OpenDocumentSummaryInformation() (*oleps.PropertySet, error) {
+	if f == nil {
+		return nil, newError(ErrInvalidArgument, "file is nil", "property.doc_summary", "", -1, nil)
+	}
+	paths := []string{"/\u0005DocumentSummaryInformation", "/DocumentSummaryInformation"}
+	var lastErr error
+	for _, p := range paths {
+		pss, err := f.OpenPropertySet(p)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if set, ok := pss.DocumentSummaryInformation(); ok {
+			return set, nil
+		}
+		lastErr = newError(ErrNotFound, "document summary information set not found in stream", "property.doc_summary", p, -1, nil)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("document summary information stream not found")
+	}
+	if oe, ok := lastErr.(*OLEError); ok {
+		return nil, oe
+	}
+	return nil, newError(ErrNotFound, "document summary information not found", "property.doc_summary", "", -1, lastErr)
+}
