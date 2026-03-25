@@ -8,7 +8,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - `pkg/oledoc`: UI-agnostic document view model contracts
 - `pkg/oleps`: OLE property set stream parser (minimal)
 - `pkg/oleds`: OLE object stream detector (Ole10Native/CompObj/Package)
-- `pkg/olextract`: placeholder for recursive extraction support
+- `pkg/olextract`: placeholder package (recursive extraction currently integrated in `pkg/olecfb`)
 
 ## Implemented so far (`pkg/olecfb`)
 
@@ -22,6 +22,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
   - MiniFAT streams
 - Strict/lenient parsing modes with warning report
 - Basic extraction report with stream hashing (SHA-256)
+- Recursive extraction for nested OLE streams with `ParentID/Children` graph
 - OLE object detection in extraction (`DetectOLEDS`)
 - Property set parsing:
   - parse property set stream header and sets

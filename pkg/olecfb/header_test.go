@@ -279,6 +279,87 @@ func TestExtract_DetectOLEDS(t *testing.T) {
 	}
 }
 
+func TestExtract_RecursiveNestedOLE(t *testing.T) {
+	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
+	outerBytes := buildValidV4FileWithBigNamedStream("Embedded", innerBytes)
+
+	f, err := OpenBytes(outerBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{Deduplicate: false, Limits: ExtractLimits{MaxDepth: 4}})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+
+	var outer, child *Artifact
+	for i := range rep.Artifacts {
+		a := &rep.Artifacts[i]
+		if a.Path == "/Embedded" {
+			outer = a
+		}
+		if a.Path == "/Embedded!/Blob" {
+			child = a
+		}
+	}
+	if outer == nil {
+		t.Fatal("outer embedded artifact not found")
+	}
+	if child == nil {
+		t.Fatal("nested child artifact not found")
+	}
+	if outer.Kind != ArtifactOLEFile {
+		t.Fatalf("unexpected outer artifact kind: %s", outer.Kind)
+	}
+	if child.ParentID != outer.ID {
+		t.Fatalf("unexpected child parent id: got %q want %q", child.ParentID, outer.ID)
+	}
+	if outer.Children == 0 {
+		t.Fatal("outer artifact should have nested children")
+	}
+}
+
+func TestExtract_RecursiveDepthLimit(t *testing.T) {
+	innerBytes, _ := buildValidV4FileWithSingleNormalStream()
+	midBytes := buildValidV4FileWithBigNamedStream("InnerOLE", innerBytes)
+	outerBytes := buildValidV4FileWithBigNamedStream("Embedded", midBytes)
+
+	f, err := OpenBytes(outerBytes, OpenOptions{Mode: Strict})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{Deduplicate: false, Limits: ExtractLimits{MaxDepth: 1}})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	foundMid := false
+	foundLeaf := false
+	foundDepthWarning := false
+	for _, a := range rep.Artifacts {
+		if a.Path == "/Embedded!/InnerOLE" {
+			foundMid = true
+		}
+		if a.Path == "/Embedded!/InnerOLE!/Blob" {
+			foundLeaf = true
+		}
+	}
+	for _, w := range rep.Warnings {
+		if w.Code == ErrDepthExceeded {
+			foundDepthWarning = true
+			break
+		}
+	}
+	if !foundMid {
+		t.Fatal("expected mid-level artifact")
+	}
+	if foundLeaf {
+		t.Fatal("leaf artifact should not be extracted when max depth is 1")
+	}
+	if !foundDepthWarning {
+		t.Fatal("expected depth exceeded warning")
+	}
+}
+
 func TestOpenStream_MiniStream(t *testing.T) {
 	buf, payload := buildValidFileWithMiniStream()
 	f, err := OpenBytes(buf, OpenOptions{Mode: Strict})
@@ -533,6 +614,57 @@ func buildValidV4FileWithNamedStream(streamName string, payloadPrefix []byte) ([
 	out = append(out, dirSector...)
 	out = append(out, payload...)
 	return out, payload
+}
+
+func buildValidV4FileWithBigNamedStream(streamName string, payload []byte) []byte {
+	const sectorSize = 4096
+	header := buildValidHeader(cfbMajorVersion4)
+	streamSectors := (len(payload) + sectorSize - 1) / sectorSize
+	if streamSectors == 0 {
+		streamSectors = 1
+	}
+	binary.LittleEndian.PutUint32(header[40:44], 1) // directory sectors
+	binary.LittleEndian.PutUint32(header[44:48], 1) // FAT sectors
+	binary.LittleEndian.PutUint32(header[48:52], 1) // first directory sector
+	binary.LittleEndian.PutUint32(header[76:80], 0) // DIFAT[0] = FAT sector
+
+	fatSector := make([]byte, sectorSize)
+	binary.LittleEndian.PutUint32(fatSector[0:4], cfbFatSector)  // sector 0: FAT
+	binary.LittleEndian.PutUint32(fatSector[4:8], cfbEndOfChain) // sector 1: directory
+	for i := 0; i < streamSectors; i++ {
+		sid := 2 + i
+		next := uint32(cfbEndOfChain)
+		if i+1 < streamSectors {
+			next = uint32(sid + 1)
+		}
+		binary.LittleEndian.PutUint32(fatSector[sid*4:sid*4+4], next)
+	}
+	for i := 2 + streamSectors; i < sectorSize/4; i++ {
+		binary.LittleEndian.PutUint32(fatSector[i*4:i*4+4], cfbFreeSector)
+	}
+
+	dirSector := make([]byte, sectorSize)
+	writeDirEntry(dirSector[0:128], "Root Entry", 5, cfbNoStream, cfbNoStream, 1, cfbEndOfChain, 0)
+	writeDirEntry(dirSector[128:256], streamName, 2, cfbNoStream, cfbNoStream, cfbNoStream, 2, uint64(len(payload)))
+
+	paddedHeader := make([]byte, sectorSize)
+	copy(paddedHeader, header)
+
+	out := append(paddedHeader, fatSector...)
+	out = append(out, dirSector...)
+	for i := 0; i < streamSectors; i++ {
+		sec := make([]byte, sectorSize)
+		start := i * sectorSize
+		end := start + sectorSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		if start < len(payload) {
+			copy(sec, payload[start:end])
+		}
+		out = append(out, sec...)
+	}
+	return out
 }
 
 func buildSummaryPropertySetStreamBytes(title string, pageCount int32) []byte {

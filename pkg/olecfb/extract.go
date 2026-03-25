@@ -4,10 +4,26 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"strconv"
 	"time"
 
 	"github.com/KairuiKin/go-olespec/pkg/oleds"
 )
+
+type extractWalker struct {
+	report         *ExtractReport
+	opt            ExtractOptions
+	openOpt        OpenOptions
+	seen           map[string]struct{}
+	totalBytes     int64
+	maxDepth       int
+	maxArtifacts   int
+	maxTotalBytes  int64
+	maxArtifactSize int64
+	nextID         int
+	indexByID      map[string]int
+	stop           bool
+}
 
 func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 	if f == nil {
@@ -29,114 +45,24 @@ func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 		maxArtifactSize = 0
 	}
 
-	seen := map[string]struct{}{}
-	totalBytes := int64(0)
-	for _, id := range f.order {
-		n, ok := f.nodes[id]
-		if !ok {
-			continue
-		}
-		if n.Type != NodeStream {
-			continue
-		}
-		if len(report.Artifacts) >= maxArtifacts {
-			report.Partial = true
-			report.Warnings = append(report.Warnings, Warning{
-				Code:     ErrLimitExceeded,
-				Message:  "artifact count limit exceeded",
-				Path:     n.Path,
-				Offset:   -1,
-				Op:       "extract",
-				Severity: SeverityWarning,
-			})
-			break
-		}
-		if maxArtifactSize > 0 && n.Size > maxArtifactSize {
-			report.Partial = true
-			report.Warnings = append(report.Warnings, Warning{
-				Code:     ErrLimitExceeded,
-				Message:  "artifact size limit exceeded",
-				Path:     n.Path,
-				Offset:   -1,
-				Op:       "extract",
-				Severity: SeverityWarning,
-			})
-			continue
-		}
-
-		artifact := Artifact{
-			ID:           "",
-			Kind:         ArtifactStream,
-			Status:       ArtifactOK,
-			Path:         n.Path,
-			MediaType:    "",
-			Size:         n.Size,
-			Depth:        f.nodeDepth(n.ID),
-			SourceNodeID: n.ID,
-		}
-
-		sr, err := f.OpenStream(n.Path)
-		if err != nil {
-			artifact.Status = ArtifactFailed
-			artifact.Error = asOLEError(err)
-			report.Artifacts = append(report.Artifacts, artifact)
-			report.Warnings = append(report.Warnings, warningFromError(err, SeverityWarning))
-			continue
-		}
-
-		sum, readBytes, isOLE, head, readErr := hashAndProbeStream(sr)
-		_ = sr.Close()
-		if readErr != nil {
-			artifact.Status = ArtifactFailed
-			artifact.Error = asOLEError(readErr)
-			report.Artifacts = append(report.Artifacts, artifact)
-			report.Warnings = append(report.Warnings, warningFromError(readErr, SeverityWarning))
-			continue
-		}
-		artifact.SHA256 = sum
-		artifact.ID = "sha256:" + sum
-		artifact.Size = readBytes
-		if isOLE {
-			artifact.Kind = ArtifactOLEFile
-		}
-		if opt.DetectOLEDS {
-			d := oleds.Detect(n.Path, head)
-			switch d.Kind {
-			case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
-				artifact.Kind = ArtifactOleObj
-				if d.Kind != oleds.KindUnknown {
-					artifact.Note = "oleds:" + string(d.Kind)
-				}
-			}
-		}
-
-		if opt.Deduplicate {
-			if _, ok := seen[artifact.SHA256]; ok {
-				report.Stats.DedupHits++
-				continue
-			}
-			seen[artifact.SHA256] = struct{}{}
-		}
-
-		if maxTotalBytes > 0 && totalBytes+artifact.Size > maxTotalBytes {
-			report.Partial = true
-			report.Warnings = append(report.Warnings, Warning{
-				Code:     ErrQuotaExceeded,
-				Message:  "total extracted bytes limit exceeded",
-				Path:     artifact.Path,
-				Offset:   -1,
-				Op:       "extract",
-				Severity: SeverityWarning,
-			})
-			break
-		}
-		totalBytes += artifact.Size
-		report.Artifacts = append(report.Artifacts, artifact)
+	openOpt := f.opt
+	openOpt.Mode = opt.Mode
+	w := &extractWalker{
+		report:          report,
+		opt:             opt,
+		openOpt:         openOpt,
+		seen:            map[string]struct{}{},
+		maxDepth:        opt.Limits.MaxDepth,
+		maxArtifacts:    maxArtifacts,
+		maxTotalBytes:   maxTotalBytes,
+		maxArtifactSize: maxArtifactSize,
+		indexByID:       map[string]int{},
 	}
+	w.walkFile(f, "", "", 0)
 
 	report.Stats.Duration = time.Since(start)
 	report.Stats.ArtifactsTotal = len(report.Artifacts)
-	report.Stats.BytesExported = totalBytes
+	report.Stats.BytesExported = w.totalBytes
 	for _, a := range report.Artifacts {
 		switch a.Status {
 		case ArtifactOK:
@@ -156,6 +82,193 @@ func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 		report.Partial = true
 	}
 	return report, nil
+}
+
+func (w *extractWalker) walkFile(file *File, pathPrefix, parentID string, depth int) {
+	if w.stop || file == nil {
+		return
+	}
+	for _, id := range file.order {
+		if w.stop {
+			return
+		}
+		n, ok := file.nodes[id]
+		if !ok || n.Type != NodeStream {
+			continue
+		}
+		w.walkStream(file, n, pathPrefix, parentID, depth)
+	}
+}
+
+func (w *extractWalker) walkStream(file *File, n Node, pathPrefix, parentID string, depth int) {
+	if len(w.report.Artifacts) >= w.maxArtifacts {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrLimitExceeded,
+			Message:  "artifact count limit exceeded",
+			Path:     n.Path,
+			Offset:   -1,
+			Op:       "extract",
+			Severity: SeverityWarning,
+		})
+		w.stop = true
+		return
+	}
+	if w.maxArtifactSize > 0 && n.Size > w.maxArtifactSize {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrLimitExceeded,
+			Message:  "artifact size limit exceeded",
+			Path:     n.Path,
+			Offset:   -1,
+			Op:       "extract",
+			Severity: SeverityWarning,
+		})
+		return
+	}
+
+	artifactPath := joinArtifactPath(pathPrefix, n.Path)
+	artifact := Artifact{
+		Kind:         ArtifactStream,
+		Status:       ArtifactOK,
+		Path:         artifactPath,
+		Size:         n.Size,
+		Depth:        depth,
+		ParentID:     parentID,
+		SourceNodeID: n.ID,
+	}
+
+	sr, err := file.OpenStream(n.Path)
+	if err != nil {
+		artifact.Status = ArtifactFailed
+		artifact.Error = asOLEError(err)
+		w.appendArtifact(artifact)
+		w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+		return
+	}
+
+	sum, readBytes, isOLE, head, readErr := hashAndProbeStream(sr)
+	_ = sr.Close()
+	if readErr != nil {
+		artifact.Status = ArtifactFailed
+		artifact.Error = asOLEError(readErr)
+		w.appendArtifact(artifact)
+		w.report.Warnings = append(w.report.Warnings, warningFromError(readErr, SeverityWarning))
+		return
+	}
+	artifact.SHA256 = sum
+	artifact.Size = readBytes
+	artifact.ID = w.newArtifactID(sum)
+	if isOLE {
+		artifact.Kind = ArtifactOLEFile
+	}
+	if w.opt.DetectOLEDS {
+		d := oleds.Detect(n.Path, head)
+		switch d.Kind {
+		case oleds.KindOle10Native, oleds.KindCompObj, oleds.KindPackage:
+			artifact.Kind = ArtifactOleObj
+			artifact.Note = "oleds:" + string(d.Kind)
+		}
+	}
+
+	if w.opt.Deduplicate {
+		if _, ok := w.seen[artifact.SHA256]; ok {
+			w.report.Stats.DedupHits++
+			return
+		}
+		w.seen[artifact.SHA256] = struct{}{}
+	}
+	if w.maxTotalBytes > 0 && w.totalBytes+artifact.Size > w.maxTotalBytes {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrQuotaExceeded,
+			Message:  "total extracted bytes limit exceeded",
+			Path:     artifact.Path,
+			Offset:   -1,
+			Op:       "extract",
+			Severity: SeverityWarning,
+		})
+		w.stop = true
+		return
+	}
+
+	w.totalBytes += artifact.Size
+	w.appendArtifact(artifact)
+	if !isOLE || w.stop {
+		return
+	}
+
+	if w.maxDepth > 0 && depth >= w.maxDepth {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, Warning{
+			Code:     ErrDepthExceeded,
+			Message:  "extract depth limit reached",
+			Path:     artifact.Path,
+			Offset:   -1,
+			Op:       "extract",
+			Severity: SeverityWarning,
+		})
+		return
+	}
+
+	payload, err := readStreamAll(file, n.Path, w.maxArtifactSize)
+	if err != nil {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+		return
+	}
+	nested, err := OpenBytes(payload, w.openOpt)
+	if err != nil {
+		w.report.Partial = true
+		w.report.Warnings = append(w.report.Warnings, warningFromError(err, SeverityWarning))
+		return
+	}
+	defer nested.Close()
+	w.walkFile(nested, artifact.Path, artifact.ID, depth+1)
+}
+
+func (w *extractWalker) appendArtifact(a Artifact) {
+	w.report.Artifacts = append(w.report.Artifacts, a)
+	idx := len(w.report.Artifacts) - 1
+	w.indexByID[a.ID] = idx
+	if a.ParentID == "" {
+		return
+	}
+	pIdx, ok := w.indexByID[a.ParentID]
+	if !ok {
+		return
+	}
+	parent := w.report.Artifacts[pIdx]
+	parent.Children++
+	w.report.Artifacts[pIdx] = parent
+}
+
+func (w *extractWalker) newArtifactID(sha string) string {
+	w.nextID++
+	return "sha256:" + sha + "#" + strconv.Itoa(w.nextID)
+}
+
+func joinArtifactPath(prefix, path string) string {
+	if prefix == "" {
+		return path
+	}
+	return prefix + "!" + path
+}
+
+func readStreamAll(f *File, streamPath string, maxBytes int64) ([]byte, error) {
+	sr, err := f.OpenStream(streamPath)
+	if err != nil {
+		return nil, err
+	}
+	defer sr.Close()
+	if maxBytes > 0 && sr.Size() > maxBytes {
+		return nil, newError(ErrLimitExceeded, "artifact size limit exceeded", "extract.read_stream", streamPath, -1, nil)
+	}
+	data, err := io.ReadAll(sr)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func hashAndProbeStream(r io.Reader) (sha string, total int64, isOLE bool, head []byte, err error) {
