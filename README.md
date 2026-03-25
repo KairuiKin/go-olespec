@@ -27,6 +27,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - OLE object detection in extraction (`DetectOLEDS`)
 - Basic image signature detection in extraction (`DetectImages`)
 - Optional raw payload embedding in artifacts (`IncludeRaw`)
+- Extract limit defaults can inherit from `OpenOptions` quotas
 - Property set parsing:
   - parse property set stream header and sets
   - read SummaryInformation / DocumentSummaryInformation fields (string/int/time basic types)

@@ -34,15 +34,19 @@ func (f *File) Extract(opt ExtractOptions) (*ExtractReport, error) {
 
 	maxArtifacts := opt.Limits.MaxArtifacts
 	if maxArtifacts <= 0 {
-		maxArtifacts = 1 << 20
+		if f.opt.MaxObjectCount > 0 {
+			maxArtifacts = f.opt.MaxObjectCount
+		} else {
+			maxArtifacts = 1 << 20
+		}
 	}
 	maxTotalBytes := opt.Limits.MaxTotalBytes
-	if maxTotalBytes < 0 {
-		maxTotalBytes = 0
+	if maxTotalBytes <= 0 && f.opt.MaxTotalBytes > 0 {
+		maxTotalBytes = f.opt.MaxTotalBytes
 	}
 	maxArtifactSize := opt.Limits.MaxArtifactSize
-	if maxArtifactSize < 0 {
-		maxArtifactSize = 0
+	if maxArtifactSize <= 0 && f.opt.MaxStreamBytes > 0 {
+		maxArtifactSize = f.opt.MaxStreamBytes
 	}
 
 	openOpt := f.opt

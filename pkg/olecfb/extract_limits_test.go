@@ -99,6 +99,31 @@ func TestExtract_DeterministicOrder(t *testing.T) {
 	}
 }
 
+func TestExtract_UsesOpenOptionDefaultLimits(t *testing.T) {
+	base := buildExtractTestFile(t)
+	snap, err := base.SnapshotBytes()
+	if err != nil {
+		t.Fatalf("SnapshotBytes returned error: %v", err)
+	}
+	f, err := OpenBytes(snap, OpenOptions{
+		Mode:          Strict,
+		MaxTotalBytes: 7, // one stream fits (4), second should exceed.
+	})
+	if err != nil {
+		t.Fatalf("OpenBytes returned error: %v", err)
+	}
+	rep, err := f.Extract(ExtractOptions{Deduplicate: false})
+	if err != nil {
+		t.Fatalf("Extract returned error: %v", err)
+	}
+	if !rep.Partial {
+		t.Fatal("expected partial report due to inherited max total bytes")
+	}
+	if rep.Stats.BytesExported > 7 {
+		t.Fatalf("unexpected exported bytes: %d", rep.Stats.BytesExported)
+	}
+}
+
 func buildExtractTestFile(t *testing.T) *File {
 	t.Helper()
 	f, err := CreateInMemory(CreateOptions{})
