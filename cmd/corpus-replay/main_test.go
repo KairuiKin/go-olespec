@@ -347,6 +347,54 @@ func TestRunReplayTrendLimit(t *testing.T) {
 	}
 }
 
+func TestRunReplayTrendGates(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	history := filepath.Join(root, "history")
+	if err := os.MkdirAll(history, 0o755); err != nil {
+		t.Fatalf("MkdirAll history returned error: %v", err)
+	}
+	writeTrendReport(t, filepath.Join(history, "r1.json"), replayReport{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Options:     replayOptions{RunID: "h1"},
+		Summary:     replaySummary{Processed: 1, Success: 1, Failed: 0, Partial: 0, PassRate: 1.0},
+	})
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-trend-dir", history,
+		"-max-pass-rate-drop", "0.1",
+		"-max-failed-increase", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected trend gate failure")
+	}
+	if !strings.Contains(err.Error(), "pass_rate_drop") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayTrendGatesRequireTrendDir(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-max-pass-rate-drop", "0.1"}, &out); err == nil {
+		t.Fatal("expected max-pass-rate-drop validation error")
+	}
+	if err := run([]string{"-max-failed-increase", "0"}, &out); err == nil {
+		t.Fatal("expected max-failed-increase validation error")
+	}
+}
+
 func buildSampleCFB(t *testing.T) []byte {
 	t.Helper()
 	f, err := olecfb.CreateInMemory(olecfb.CreateOptions{})

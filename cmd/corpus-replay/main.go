@@ -134,6 +134,8 @@ type replayGateResult struct {
 	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
 	MaxFailed               *int     `json:"max_failed,omitempty"`
 	MaxNewlyFailed          *int     `json:"max_newly_failed,omitempty"`
+	MaxPassRateDrop         *float64 `json:"max_pass_rate_drop,omitempty"`
+	MaxFailedIncrease       *int     `json:"max_failed_increase,omitempty"`
 	DenyErrorCodes          []string `json:"deny_error_codes,omitempty"`
 	MaxNewErrorCodes        *int     `json:"max_new_error_codes,omitempty"`
 	MaxErrorCodeRegressions *int     `json:"max_error_code_regressions,omitempty"`
@@ -174,6 +176,8 @@ func run(args []string, out io.Writer) error {
 		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
 		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
 		maxNewlyFailed          = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
+		maxPassRateDrop         = fset.Float64("max-pass-rate-drop", -1, "gate: maximum allowed pass-rate drop vs latest trend point in [0,1], negative disables")
+		maxFailedIncrease       = fset.Int("max-failed-increase", -1, "gate: maximum allowed failed-files increase vs latest trend point, negative disables")
 		denyErrorCodes          = fset.String("deny-error-codes", "", "gate: comma-separated error codes that must not appear")
 		maxNewErrorCodes        = fset.Int("max-new-error-codes", -1, "gate: maximum allowed new error codes vs baseline, negative disables")
 		maxErrorCodeRegressions = fset.Int("max-error-code-regressions", -1, "gate: maximum allowed error codes with increased failure count vs baseline, negative disables")
@@ -191,8 +195,17 @@ func run(args []string, out io.Writer) error {
 	if *maxErrorCodeRegressions >= 0 && strings.TrimSpace(*baselinePath) == "" {
 		return errors.New("max-error-code-regressions requires -baseline")
 	}
+	if *maxPassRateDrop >= 0 && strings.TrimSpace(*trendDir) == "" {
+		return errors.New("max-pass-rate-drop requires -trend-dir")
+	}
+	if *maxFailedIncrease >= 0 && strings.TrimSpace(*trendDir) == "" {
+		return errors.New("max-failed-increase requires -trend-dir")
+	}
 	if *minPassRate > 1 {
 		return errors.New("min-pass-rate must be <= 1")
+	}
+	if *maxPassRateDrop > 1 {
+		return errors.New("max-pass-rate-drop must be <= 1")
 	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
 
@@ -360,6 +373,16 @@ func run(args []string, out io.Writer) error {
 		v := *maxNewlyFailed
 		maxNewlyFailedPtr = &v
 	}
+	var maxPassRateDropPtr *float64
+	if *maxPassRateDrop >= 0 {
+		v := *maxPassRateDrop
+		maxPassRateDropPtr = &v
+	}
+	var maxFailedIncreasePtr *int
+	if *maxFailedIncrease >= 0 {
+		v := *maxFailedIncrease
+		maxFailedIncreasePtr = &v
+	}
 	var maxNewErrorCodesPtr *int
 	if *maxNewErrorCodes >= 0 {
 		v := *maxNewErrorCodes
@@ -370,7 +393,17 @@ func run(args []string, out io.Writer) error {
 		v := *maxErrorCodeRegressions
 		maxErrorCodeRegressionsPtr = &v
 	}
-	gateErr := evaluateGates(&report, minPassRatePtr, maxFailedPtr, maxNewlyFailedPtr, denyCodes, maxNewErrorCodesPtr, maxErrorCodeRegressionsPtr)
+	gateErr := evaluateGates(
+		&report,
+		minPassRatePtr,
+		maxFailedPtr,
+		maxNewlyFailedPtr,
+		maxPassRateDropPtr,
+		maxFailedIncreasePtr,
+		denyCodes,
+		maxNewErrorCodesPtr,
+		maxErrorCodeRegressionsPtr,
+	)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -551,6 +584,8 @@ func evaluateGates(
 	minPassRate *float64,
 	maxFailed *int,
 	maxNewlyFailed *int,
+	maxPassRateDrop *float64,
+	maxFailedIncrease *int,
 	denyErrorCodes []string,
 	maxNewErrorCodes *int,
 	maxErrorCodeRegressions *int,
@@ -560,11 +595,13 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinPassRate:             minPassRate,
 		MaxFailed:               maxFailed,
 		MaxNewlyFailed:          maxNewlyFailed,
+		MaxPassRateDrop:         maxPassRateDrop,
+		MaxFailedIncrease:       maxFailedIncrease,
 		DenyErrorCodes:          denyErrorCodes,
 		MaxNewErrorCodes:        maxNewErrorCodes,
 		MaxErrorCodeRegressions: maxErrorCodeRegressions,
@@ -587,6 +624,25 @@ func evaluateGates(
 		} else if report.Baseline.NewlyFailed > *maxNewlyFailed {
 			report.Gate.Failures = append(report.Gate.Failures,
 				fmt.Sprintf("newly_failed %d > max_newly_failed %d", report.Baseline.NewlyFailed, *maxNewlyFailed))
+		}
+	}
+	if maxPassRateDrop != nil {
+		if report.Trend == nil || report.Trend.LatestDelta == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_pass_rate_drop gate requires trend latest delta")
+		} else {
+			drop := -report.Trend.LatestDelta.DeltaPassRate
+			if drop > *maxPassRateDrop {
+				report.Gate.Failures = append(report.Gate.Failures,
+					fmt.Sprintf("pass_rate_drop %.6f > max_pass_rate_drop %.6f", drop, *maxPassRateDrop))
+			}
+		}
+	}
+	if maxFailedIncrease != nil {
+		if report.Trend == nil || report.Trend.LatestDelta == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_failed_increase gate requires trend latest delta")
+		} else if report.Trend.LatestDelta.DeltaFailed > *maxFailedIncrease {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("failed_increase %d > max_failed_increase %d", report.Trend.LatestDelta.DeltaFailed, *maxFailedIncrease))
 		}
 	}
 	for _, code := range denyErrorCodes {
