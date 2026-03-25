@@ -310,6 +310,9 @@ func (f *File) OpenStream(streamPath string) (StreamReader, error) {
 	if target.Size < 0 {
 		return nil, newError(ErrDirCorrupt, "negative stream size", "open_stream", string(canonical), -1, nil)
 	}
+	if f.opt.MaxStreamBytes > 0 && target.Size > f.opt.MaxStreamBytes {
+		return nil, newError(ErrLimitExceeded, "stream size exceeds configured MaxStreamBytes", "open_stream", string(canonical), -1, nil)
+	}
 
 	entry, ok := f.entries[target.ID]
 	if !ok {

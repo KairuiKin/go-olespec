@@ -516,6 +516,9 @@ func (f *File) readStreamByID(id NodeID, sizeHint int64) ([]byte, error) {
 	if sizeHint <= 0 && node.Size <= 0 {
 		return nil, nil
 	}
+	if f.opt.MaxStreamBytes > 0 && node.Size > f.opt.MaxStreamBytes {
+		return nil, newError(ErrLimitExceeded, "stream size exceeds configured MaxStreamBytes", "stream.read_by_id", node.Path, -1, nil)
+	}
 	if f.hdr == nil {
 		return nil, newError(ErrBadHeader, "header is missing", "stream.read_by_id", node.Path, -1, nil)
 	}
