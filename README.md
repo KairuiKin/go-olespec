@@ -33,6 +33,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
   - parse property set stream header and sets
   - read SummaryInformation / DocumentSummaryInformation fields (string/int/time basic types)
   - marshal/write property set streams via transaction (`Tx.PutPropertySet`)
+  - convenience write helpers: `Tx.PutSummaryInformation` / `Tx.PutDocumentSummaryInformation`
 - Transaction (v1):
   - `CreateStorage` / `PutStream` / `Delete` / `Rename` / `Commit` / `Revert`
   - `Commit` uses `FullRewrite` serializer and writes back to mem/file backend

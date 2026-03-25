@@ -62,6 +62,8 @@ func (tx *Tx) Delete(path string) error
 func (tx *Tx) Rename(oldPath, newPath string) error
 func (tx *Tx) CreateStorage(path string) error
 func (tx *Tx) PutPropertySet(path string, stream *oleps.Stream) error
+func (tx *Tx) PutSummaryInformation(set *oleps.PropertySet) error
+func (tx *Tx) PutDocumentSummaryInformation(set *oleps.PropertySet) error
 func (tx *Tx) Commit(ctx context.Context, opt CommitOptions) (*CommitResult, error)
 func (tx *Tx) Revert() error
 ```
