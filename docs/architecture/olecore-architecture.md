@@ -65,7 +65,9 @@
 - 同一 `File` 同时只允许一个活跃事务。
 - `Begin -> Mutate -> Commit/Revert`。
 - 提交失败不污染原状态。
-- v1 提交策略默认 `FullRewrite`；`Incremental` 作为 v2 优化。
+- v1 提交策略默认 `FullRewrite`，并支持受限 `Incremental`：
+  - 仅支持“单个已存在流、大小不变”的原位更新。
+  - 不满足条件自动回退 `FullRewrite`。
 
 ## 7. Path 规范
 
@@ -98,3 +100,4 @@
 - `go test -race` 必过。
 - 回归语料与差分测试必过。
 - 性能回归阈值纳入 CI。
+- 基准基线（当前）：`BenchmarkExtractFlat`、`BenchmarkExtractRecursive`、`BenchmarkCommitFullRewrite`、`BenchmarkCommitIncrementalInPlace`。

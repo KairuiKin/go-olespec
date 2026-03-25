@@ -4,7 +4,28 @@ import (
 	"io"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
+	"github.com/KairuiKin/go-olespec/pkg/olecfb/storage"
 )
+
+// ExtractBackend opens an OLE/CFB read backend and runs extraction with the provided options.
+// The backend is always closed before returning.
+func ExtractBackend(rb storage.ReadBackend, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error) {
+	if rb == nil {
+		return nil, &olecfb.OLEError{
+			Code:    olecfb.ErrInvalidArgument,
+			Message: "read backend is nil",
+			Op:      "olextract.extract_backend",
+			Offset:  -1,
+		}
+	}
+	f, err := olecfb.Open(rb, openOpt)
+	if err != nil {
+		_ = rb.Close()
+		return nil, err
+	}
+	defer f.Close()
+	return f.Extract(extractOpt)
+}
 
 // ExtractBytes opens an OLE/CFB buffer and runs extraction with the provided options.
 func ExtractBytes(buf []byte, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error) {

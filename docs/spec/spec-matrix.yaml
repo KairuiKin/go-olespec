@@ -49,6 +49,7 @@ items:
       - "integration/tx_commit_atomic"
       - "integration/tx_revert"
       - "integration/tx_commit_failure_no_pollution"
+      - "integration/tx_incremental_fallback_failure_no_pollution"
 
   - id: CFB-PATH-001
     section: "Path canonicalization"
@@ -68,6 +69,7 @@ items:
       - "integration/walk_deterministic"
       - "integration/report_deterministic"
       - "integration/walkex_deterministic"
+      - "integration/extract_recursive_detectors_deterministic"
 
   - id: OLEPS-001
     section: "MS-OLEPS"
@@ -100,3 +102,14 @@ items:
       - "integration/extract_dedup"
       - "integration/extract_artifact_limit"
       - "integration/extract_deterministic"
+
+  - id: PERF-001
+    section: "Performance baseline"
+    level: SHOULD
+    requirement: "Track extraction and commit strategy perf regressions with stable benchmark cases"
+    implementation: "pkg/olecfb"
+    tests:
+      - "bench/extract_flat"
+      - "bench/extract_recursive"
+      - "bench/commit_full_rewrite"
+      - "bench/commit_incremental_in_place"

@@ -3,11 +3,13 @@ package olextract
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
+	"github.com/KairuiKin/go-olespec/pkg/olecfb/storage"
 )
 
 func TestExtractBytes(t *testing.T) {
@@ -25,6 +27,43 @@ func TestExtractBytes(t *testing.T) {
 	}
 	if rep.Artifacts[0].Path != "/Docs/A" {
 		t.Fatalf("unexpected artifact path: %s", rep.Artifacts[0].Path)
+	}
+}
+
+func TestExtractBackend(t *testing.T) {
+	buf := buildSampleCFBBytes(t)
+	rb := &testReadBackend{buf: buf}
+	rep, err := ExtractBackend(
+		rb,
+		olecfb.OpenOptions{Mode: olecfb.Strict},
+		olecfb.ExtractOptions{Deduplicate: true},
+	)
+	if err != nil {
+		t.Fatalf("ExtractBackend returned error: %v", err)
+	}
+	if rep.Stats.ArtifactsTotal != 1 {
+		t.Fatalf("unexpected artifacts total: %d", rep.Stats.ArtifactsTotal)
+	}
+	if !rb.closed {
+		t.Fatal("backend should be closed")
+	}
+}
+
+func TestExtractBackendNil(t *testing.T) {
+	if _, err := ExtractBackend(nil, olecfb.OpenOptions{}, olecfb.ExtractOptions{}); err == nil {
+		t.Fatal("expected error for nil backend")
+	} else if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestExtractBackendOpenFailureClosesBackend(t *testing.T) {
+	rb := &testReadBackend{buf: []byte("not-cfb")}
+	if _, err := ExtractBackend(rb, olecfb.OpenOptions{Mode: olecfb.Strict}, olecfb.ExtractOptions{}); err == nil {
+		t.Fatal("expected open failure")
+	}
+	if !rb.closed {
+		t.Fatal("backend should be closed on open failure")
 	}
 }
 
@@ -109,4 +148,29 @@ type failReader struct{}
 
 func (failReader) Read(_ []byte) (int, error) {
 	return 0, errors.New("boom")
+}
+
+type testReadBackend struct {
+	buf    []byte
+	closed bool
+}
+
+var _ storage.ReadBackend = (*testReadBackend)(nil)
+
+func (b *testReadBackend) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 || off >= int64(len(b.buf)) {
+		return 0, io.EOF
+	}
+	n := copy(p, b.buf[off:])
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (b *testReadBackend) Size() int64 { return int64(len(b.buf)) }
+
+func (b *testReadBackend) Close() error {
+	b.closed = true
+	return nil
 }

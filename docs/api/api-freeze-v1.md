@@ -37,6 +37,20 @@ func CreateInMemory(opt CreateOptions) (*File, error)
 func CreateFile(path string, opt CreateOptions) (*File, error)
 ```
 
+`olextract` 门面 API：
+
+```go
+func ExtractBackend(rb storage.ReadBackend, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
+func ExtractBytes(buf []byte, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
+func ExtractFile(path string, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
+func ExtractReader(r io.Reader, openOpt olecfb.OpenOptions, extractOpt olecfb.ExtractOptions) (*olecfb.ExtractReport, error)
+```
+
+`ExtractBackend` 语义：
+
+- 始终在返回前关闭 `ReadBackend`。
+- `rb=nil` 返回 `INVALID_ARGUMENT`。
+
 `Open` 配额行为：
 
 - `OpenOptions.MaxTotalBytes > 0` 时，若容器大小超限，`Open` 直接返回 `QUOTA_EXCEEDED`
