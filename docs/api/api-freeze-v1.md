@@ -37,6 +37,10 @@ func CreateInMemory(opt CreateOptions) (*File, error)
 func CreateFile(path string, opt CreateOptions) (*File, error)
 ```
 
+`Open` 配额行为：
+
+- `OpenOptions.MaxTotalBytes > 0` 时，若容器大小超限，`Open` 直接返回 `QUOTA_EXCEEDED`
+
 ## 4. File/Tx API
 
 ```go
@@ -100,6 +104,11 @@ type StreamReader interface {
 - `NewSize`: 提交后容器大小
 - `BackendKind`: `mem` / `file`
 - `StrategyUsed`: 实际使用的提交策略（`FullRewrite` 或 `Incremental`）
+
+`Incremental`（v1）约束：
+
+- 仅支持“单个已存在流、大小不变”的原位更新
+- 其他场景自动回退 `FullRewrite`
 
 ## 6. Error Contract
 
