@@ -67,6 +67,7 @@ items:
     tests:
       - "integration/walk_deterministic"
       - "integration/report_deterministic"
+      - "integration/walkex_deterministic"
 
   - id: OLEPS-001
     section: "MS-OLEPS"
