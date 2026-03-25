@@ -25,6 +25,7 @@ type WriteOptions struct {
 type WrittenFile struct {
 	ArtifactID   string
 	ArtifactPath string
+	RelativePath string
 	FilePath     string
 	Size         int64
 }
@@ -145,6 +146,7 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 		out.Files = append(out.Files, WrittenFile{
 			ArtifactID:   a.ID,
 			ArtifactPath: a.Path,
+			RelativePath: rel,
 			FilePath:     p,
 			Size:         int64(len(a.Raw)),
 		})
@@ -325,6 +327,7 @@ type writeManifestData struct {
 type writeManifestEntry struct {
 	ArtifactID   string `json:"artifact_id"`
 	ArtifactPath string `json:"artifact_path"`
+	RelativePath string `json:"relative_path"`
 	FilePath     string `json:"file_path"`
 	Size         int64  `json:"size"`
 }
@@ -354,6 +357,7 @@ func writeManifestFile(path string, report *olecfb.ExtractReport, res WriteResul
 		m.Files = append(m.Files, writeManifestEntry{
 			ArtifactID:   f.ArtifactID,
 			ArtifactPath: f.ArtifactPath,
+			RelativePath: filepath.ToSlash(f.RelativePath),
 			FilePath:     f.FilePath,
 			Size:         f.Size,
 		})

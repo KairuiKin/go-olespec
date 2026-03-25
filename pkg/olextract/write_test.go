@@ -32,6 +32,9 @@ func TestWriteArtifacts(t *testing.T) {
 	if len(res.Files) != 1 {
 		t.Fatalf("unexpected files list count: %d", len(res.Files))
 	}
+	if res.Files[0].RelativePath == "" {
+		t.Fatal("expected relative path")
+	}
 	got, err := os.ReadFile(res.Files[0].FilePath)
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
@@ -130,7 +133,8 @@ func TestWriteArtifactsTreeLayoutAndManifest(t *testing.T) {
 	}
 	var parsed struct {
 		Files []struct {
-			ArtifactID string `json:"artifact_id"`
+			ArtifactID   string `json:"artifact_id"`
+			RelativePath string `json:"relative_path"`
 		} `json:"files"`
 	}
 	if err := json.Unmarshal(mf, &parsed); err != nil {
@@ -138,6 +142,11 @@ func TestWriteArtifactsTreeLayoutAndManifest(t *testing.T) {
 	}
 	if len(parsed.Files) != 2 {
 		t.Fatalf("unexpected manifest files count: %d", len(parsed.Files))
+	}
+	for _, f := range parsed.Files {
+		if f.RelativePath == "" {
+			t.Fatal("expected manifest relative_path")
+		}
 	}
 }
 
