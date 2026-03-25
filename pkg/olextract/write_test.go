@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
@@ -168,6 +169,30 @@ func TestWriteArtifactsManifestConflict(t *testing.T) {
 		t.Fatal("expected manifest conflict")
 	} else if !olecfb.IsCode(err, olecfb.ErrConflict) {
 		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestWriteArtifactsUsesOleFileNameExtension(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{
+				ID:          "a1",
+				Path:        "/Obj",
+				Kind:        olecfb.ArtifactOleObj,
+				OLEFileName: "hello.TXT",
+				Raw:         []byte("abc"),
+			},
+		},
+	}
+	res, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if res.FilesWritten != 1 {
+		t.Fatalf("unexpected files written: %d", res.FilesWritten)
+	}
+	if !strings.HasSuffix(strings.ToLower(res.Files[0].FilePath), ".txt") {
+		t.Fatalf("expected .txt suffix, got %s", res.Files[0].FilePath)
 	}
 }
 

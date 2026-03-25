@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -379,6 +380,11 @@ func writeManifestFile(path string, report *olecfb.ExtractReport, res WriteResul
 }
 
 func extensionByArtifact(a olecfb.Artifact) string {
+	if (a.Kind == olecfb.ArtifactOleObj || a.Kind == olecfb.ArtifactStream) && a.OLEFileName != "" {
+		if ext, ok := safeExt(path.Ext(a.OLEFileName)); ok {
+			return ext
+		}
+	}
 	switch a.MediaType {
 	case "image/png":
 		return ".png"
@@ -403,4 +409,19 @@ func extensionByArtifact(a olecfb.Artifact) string {
 	default:
 		return ".bin"
 	}
+}
+
+func safeExt(ext string) (string, bool) {
+	if ext == "" || len(ext) > 16 {
+		return "", false
+	}
+	if ext[0] != '.' {
+		return "", false
+	}
+	for _, r := range ext[1:] {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return "", false
+		}
+	}
+	return strings.ToLower(ext), true
 }
