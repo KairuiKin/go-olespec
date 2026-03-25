@@ -77,6 +77,7 @@ items:
     tests:
       - "unit/oleps_read_common"
       - "regression/oleps_preserve_unknown"
+      - "unit/oleps_unknown_property_raw"
 
   - id: OLEDS-001
     section: "MS-OLEDS"
