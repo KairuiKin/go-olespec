@@ -470,6 +470,83 @@ func TestWriteArtifactsUsesOleFileNameExtension(t *testing.T) {
 	}
 }
 
+func TestWriteArtifactsPreferOLEFileNameFlat(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{
+				Path:        "/Obj",
+				Kind:        olecfb.ArtifactOleObj,
+				OLEFileName: "hello world.TXT",
+				Raw:         []byte("abc"),
+			},
+		},
+	}
+	res, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{PreferOLEFileName: true})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("unexpected files count: %d", len(res.Files))
+	}
+	if res.Files[0].RelativePath != "000000_hello_world.txt" {
+		t.Fatalf("unexpected relative path: %s", res.Files[0].RelativePath)
+	}
+}
+
+func TestWriteArtifactsPreferOLEFileNameTree(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{
+				Path:        "/Docs/Sub/Blob",
+				Kind:        olecfb.ArtifactOleObj,
+				OLEFileName: "C:/tmp/final-name.bin",
+				Raw:         []byte("abc"),
+			},
+		},
+	}
+	res, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{
+		Layout:            WriteLayoutTree,
+		PreferOLEFileName: true,
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("unexpected files count: %d", len(res.Files))
+	}
+	rel := filepath.ToSlash(res.Files[0].RelativePath)
+	if rel != "Docs/Sub/000000_final-name.bin" {
+		t.Fatalf("unexpected relative path: %s", rel)
+	}
+}
+
+func TestWriteArtifactsPreferOLEFileNameDisabledKeepsPathStem(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{
+				Path:        "/Docs/Sub/Blob",
+				Kind:        olecfb.ArtifactOleObj,
+				OLEFileName: "hello.txt",
+				Raw:         []byte("abc"),
+			},
+		},
+	}
+	res, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{
+		Layout:            WriteLayoutTree,
+		PreferOLEFileName: false,
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("unexpected files count: %d", len(res.Files))
+	}
+	rel := filepath.ToSlash(res.Files[0].RelativePath)
+	if rel != "Docs/Sub/000000_Blob.txt" {
+		t.Fatalf("unexpected relative path when disabled: %s", rel)
+	}
+}
+
 func TestWriteArtifactsTreeLayoutAvoidsReservedWindowsNames(t *testing.T) {
 	rep := &olecfb.ExtractReport{
 		Artifacts: []olecfb.Artifact{

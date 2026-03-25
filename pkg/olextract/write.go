@@ -19,11 +19,12 @@ import (
 )
 
 type WriteOptions struct {
-	Overwrite     bool
-	Layout        WriteLayout
-	WriteManifest bool
-	ManifestName  string
-	AtomicPublish bool
+	Overwrite         bool
+	Layout            WriteLayout
+	WriteManifest     bool
+	ManifestName      string
+	AtomicPublish     bool
+	PreferOLEFileName bool
 }
 
 type WrittenFile struct {
@@ -114,9 +115,9 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 		var rel string
 		switch layout {
 		case WriteLayoutTree:
-			rel = buildArtifactTreePath(i, a)
+			rel = buildArtifactTreePath(i, a, opt.PreferOLEFileName)
 		default:
-			rel = buildArtifactFileName(i, a)
+			rel = buildArtifactFileName(i, a, opt.PreferOLEFileName)
 		}
 		p := filepath.Join(dstDir, rel)
 		plans = append(plans, writePlan{artifact: a, rel: rel, abs: p})
@@ -543,8 +544,11 @@ func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.O
 	return rep, res, nil
 }
 
-func buildArtifactFileName(index int, a olecfb.Artifact) string {
-	base := sanitizeName(a.Path)
+func buildArtifactFileName(index int, a olecfb.Artifact, preferOLEFileName bool) string {
+	base := preferredStem(a, preferOLEFileName)
+	if base == "" {
+		base = sanitizeName(a.Path)
+	}
 	if base == "" {
 		base = "artifact"
 	}
@@ -555,7 +559,7 @@ func buildArtifactFileName(index int, a olecfb.Artifact) string {
 	return fmt.Sprintf("%06d_%s%s", index, base, ext)
 }
 
-func buildArtifactTreePath(index int, a olecfb.Artifact) string {
+func buildArtifactTreePath(index int, a olecfb.Artifact, preferOLEFileName bool) string {
 	segments := splitArtifactPathForTree(a.Path)
 	if len(segments) == 0 {
 		segments = []string{"artifact"}
@@ -566,7 +570,10 @@ func buildArtifactTreePath(index int, a olecfb.Artifact) string {
 			segments[i] = "artifact"
 		}
 	}
-	fileName := segments[len(segments)-1]
+	fileName := preferredStem(a, preferOLEFileName)
+	if fileName == "" {
+		fileName = segments[len(segments)-1]
+	}
 	if len(fileName) > 80 {
 		fileName = fileName[:80]
 	}
@@ -576,6 +583,16 @@ func buildArtifactTreePath(index int, a olecfb.Artifact) string {
 	}
 	dir := filepath.Join(segments[:len(segments)-1]...)
 	return filepath.Join(dir, fileName)
+}
+
+func preferredStem(a olecfb.Artifact, enabled bool) string {
+	if !enabled || a.OLEFileName == "" {
+		return ""
+	}
+	base := path.Base(a.OLEFileName)
+	ext := path.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	return sanitizeName(stem)
 }
 
 func splitArtifactPathForTree(path string) []string {
