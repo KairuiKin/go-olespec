@@ -48,14 +48,15 @@ type replayFileResult struct {
 }
 
 type replaySummary struct {
-	ScannedFiles int     `json:"scanned_files"`
-	MatchedFiles int     `json:"matched_files"`
-	Processed    int     `json:"processed"`
-	Success      int     `json:"success"`
-	Failed       int     `json:"failed"`
-	Partial      int     `json:"partial"`
-	PassRate     float64 `json:"pass_rate"`
-	DurationMS   int64   `json:"duration_ms"`
+	ScannedFiles int            `json:"scanned_files"`
+	MatchedFiles int            `json:"matched_files"`
+	Processed    int            `json:"processed"`
+	Success      int            `json:"success"`
+	Failed       int            `json:"failed"`
+	Partial      int            `json:"partial"`
+	PassRate     float64        `json:"pass_rate"`
+	DurationMS   int64          `json:"duration_ms"`
+	ErrorCodes   map[string]int `json:"error_codes,omitempty"`
 }
 
 type replayReport struct {
@@ -68,17 +69,27 @@ type replayReport struct {
 }
 
 type replayBaseline struct {
-	BaselinePath      string             `json:"baseline_path"`
-	BaselineGenerated string             `json:"baseline_generated_at,omitempty"`
-	BaselineFiles     int                `json:"baseline_files"`
-	CurrentFiles      int                `json:"current_files"`
-	NewFiles          int                `json:"new_files"`
-	RemovedFiles      int                `json:"removed_files"`
-	NewlyFailed       int                `json:"newly_failed"`
-	Fixed             int                `json:"fixed"`
-	ErrorCodeChanged  int                `json:"error_code_changed"`
-	NewlyPartial      int                `json:"newly_partial"`
-	Regressions       []replayRegression `json:"regressions,omitempty"`
+	BaselinePath        string             `json:"baseline_path"`
+	BaselineGenerated   string             `json:"baseline_generated_at,omitempty"`
+	BaselineFiles       int                `json:"baseline_files"`
+	CurrentFiles        int                `json:"current_files"`
+	NewFiles            int                `json:"new_files"`
+	RemovedFiles        int                `json:"removed_files"`
+	NewlyFailed         int                `json:"newly_failed"`
+	Fixed               int                `json:"fixed"`
+	ErrorCodeChanged    int                `json:"error_code_changed"`
+	NewlyPartial        int                `json:"newly_partial"`
+	ErrorCodeDelta      map[string]int     `json:"error_code_delta,omitempty"`
+	NewErrorCodes       []string           `json:"new_error_codes,omitempty"`
+	IncreasedErrorCodes []replayCodeDelta  `json:"increased_error_codes,omitempty"`
+	Regressions         []replayRegression `json:"regressions,omitempty"`
+}
+
+type replayCodeDelta struct {
+	Code     string `json:"code"`
+	Baseline int    `json:"baseline"`
+	Current  int    `json:"current"`
+	Delta    int    `json:"delta"`
 }
 
 type replayRegression struct {
@@ -89,12 +100,15 @@ type replayRegression struct {
 }
 
 type replayGateResult struct {
-	Enabled        bool     `json:"enabled"`
-	Passed         bool     `json:"passed"`
-	MinPassRate    *float64 `json:"min_pass_rate,omitempty"`
-	MaxFailed      *int     `json:"max_failed,omitempty"`
-	MaxNewlyFailed *int     `json:"max_newly_failed,omitempty"`
-	Failures       []string `json:"failures,omitempty"`
+	Enabled                 bool     `json:"enabled"`
+	Passed                  bool     `json:"passed"`
+	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
+	MaxFailed               *int     `json:"max_failed,omitempty"`
+	MaxNewlyFailed          *int     `json:"max_newly_failed,omitempty"`
+	DenyErrorCodes          []string `json:"deny_error_codes,omitempty"`
+	MaxNewErrorCodes        *int     `json:"max_new_error_codes,omitempty"`
+	MaxErrorCodeRegressions *int     `json:"max_error_code_regressions,omitempty"`
+	Failures                []string `json:"failures,omitempty"`
 }
 
 func main() {
@@ -112,23 +126,26 @@ func run(args []string, out io.Writer) error {
 	fset.SetOutput(io.Discard)
 
 	var (
-		root            = fset.String("root", ".", "root directory for corpus files")
-		extCSV          = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
-		modeStr         = fset.String("mode", "lenient", "parse mode: strict|lenient")
-		baselinePath    = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
-		includeRaw      = fset.Bool("include-raw", false, "include raw artifact payloads in extraction")
-		detectImages    = fset.Bool("detect-images", true, "enable image signature detection")
-		detectOLEDS     = fset.Bool("detect-oleds", true, "enable OLEDS stream detection")
-		unwrapOle10     = fset.Bool("unwrap-ole10native", true, "enable recursive Ole10Native unwrapping")
-		dedup           = fset.Bool("deduplicate", true, "enable SHA-256 dedup")
-		maxDepth        = fset.Int("max-depth", 16, "max recursive extraction depth")
-		maxArtifacts    = fset.Int("max-artifacts", 4096, "max artifacts per file")
-		maxTotalBytes   = fset.Int64("max-total-bytes", 64<<20, "max total extracted bytes per file")
-		maxArtifactSize = fset.Int64("max-artifact-size", 32<<20, "max single artifact size in bytes")
-		minPassRate     = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
-		maxFailed       = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
-		maxNewlyFailed  = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
-		outputPath      = fset.String("output", "", "output report path; empty prints JSON to stdout")
+		root                    = fset.String("root", ".", "root directory for corpus files")
+		extCSV                  = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
+		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
+		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
+		includeRaw              = fset.Bool("include-raw", false, "include raw artifact payloads in extraction")
+		detectImages            = fset.Bool("detect-images", true, "enable image signature detection")
+		detectOLEDS             = fset.Bool("detect-oleds", true, "enable OLEDS stream detection")
+		unwrapOle10             = fset.Bool("unwrap-ole10native", true, "enable recursive Ole10Native unwrapping")
+		dedup                   = fset.Bool("deduplicate", true, "enable SHA-256 dedup")
+		maxDepth                = fset.Int("max-depth", 16, "max recursive extraction depth")
+		maxArtifacts            = fset.Int("max-artifacts", 4096, "max artifacts per file")
+		maxTotalBytes           = fset.Int64("max-total-bytes", 64<<20, "max total extracted bytes per file")
+		maxArtifactSize         = fset.Int64("max-artifact-size", 32<<20, "max single artifact size in bytes")
+		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
+		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
+		maxNewlyFailed          = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
+		denyErrorCodes          = fset.String("deny-error-codes", "", "gate: comma-separated error codes that must not appear")
+		maxNewErrorCodes        = fset.Int("max-new-error-codes", -1, "gate: maximum allowed new error codes vs baseline, negative disables")
+		maxErrorCodeRegressions = fset.Int("max-error-code-regressions", -1, "gate: maximum allowed error codes with increased failure count vs baseline, negative disables")
+		outputPath              = fset.String("output", "", "output report path; empty prints JSON to stdout")
 	)
 	if err := fset.Parse(args); err != nil {
 		return err
@@ -136,9 +153,16 @@ func run(args []string, out io.Writer) error {
 	if *maxNewlyFailed >= 0 && strings.TrimSpace(*baselinePath) == "" {
 		return errors.New("max-newly-failed requires -baseline")
 	}
+	if *maxNewErrorCodes >= 0 && strings.TrimSpace(*baselinePath) == "" {
+		return errors.New("max-new-error-codes requires -baseline")
+	}
+	if *maxErrorCodeRegressions >= 0 && strings.TrimSpace(*baselinePath) == "" {
+		return errors.New("max-error-code-regressions requires -baseline")
+	}
 	if *minPassRate > 1 {
 		return errors.New("min-pass-rate must be <= 1")
 	}
+	denyCodes := parseCSVTokens(*denyErrorCodes)
 
 	mode, err := parseMode(*modeStr)
 	if err != nil {
@@ -270,6 +294,7 @@ func run(args []string, out io.Writer) error {
 	if report.Summary.Processed > 0 {
 		report.Summary.PassRate = float64(report.Summary.Success) / float64(report.Summary.Processed)
 	}
+	report.Summary.ErrorCodes = collectErrorCodeCounts(report.Files)
 	if strings.TrimSpace(*baselinePath) != "" {
 		baseline, loadErr := loadReplayReport(*baselinePath)
 		if loadErr != nil {
@@ -293,7 +318,17 @@ func run(args []string, out io.Writer) error {
 		v := *maxNewlyFailed
 		maxNewlyFailedPtr = &v
 	}
-	gateErr := evaluateGates(&report, minPassRatePtr, maxFailedPtr, maxNewlyFailedPtr)
+	var maxNewErrorCodesPtr *int
+	if *maxNewErrorCodes >= 0 {
+		v := *maxNewErrorCodes
+		maxNewErrorCodesPtr = &v
+	}
+	var maxErrorCodeRegressionsPtr *int
+	if *maxErrorCodeRegressions >= 0 {
+		v := *maxErrorCodeRegressions
+		maxErrorCodeRegressionsPtr = &v
+	}
+	gateErr := evaluateGates(&report, minPassRatePtr, maxFailedPtr, maxNewlyFailedPtr, denyCodes, maxNewErrorCodesPtr, maxErrorCodeRegressionsPtr)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -342,11 +377,14 @@ func loadReplayReport(path string) (replayReport, error) {
 
 func diffReplayReport(baselinePath string, base replayReport, cur replayReport) *replayBaseline {
 	out := &replayBaseline{
-		BaselinePath:      baselinePath,
-		BaselineGenerated: base.GeneratedAt,
-		BaselineFiles:     len(base.Files),
-		CurrentFiles:      len(cur.Files),
-		Regressions:       make([]replayRegression, 0, 16),
+		BaselinePath:        baselinePath,
+		BaselineGenerated:   base.GeneratedAt,
+		BaselineFiles:       len(base.Files),
+		CurrentFiles:        len(cur.Files),
+		ErrorCodeDelta:      map[string]int{},
+		NewErrorCodes:       make([]string, 0, 8),
+		IncreasedErrorCodes: make([]replayCodeDelta, 0, 8),
+		Regressions:         make([]replayRegression, 0, 16),
 	}
 
 	baseByPath := map[string]replayFileResult{}
@@ -406,12 +444,47 @@ func diffReplayReport(baselinePath string, base replayReport, cur replayReport) 
 			out.RemovedFiles++
 		}
 	}
+
+	baseCodes := collectErrorCodeCounts(base.Files)
+	curCodes := collectErrorCodeCounts(cur.Files)
+	keys := sortedUnionKeys(baseCodes, curCodes)
+	for _, k := range keys {
+		delta := curCodes[k] - baseCodes[k]
+		if delta != 0 {
+			out.ErrorCodeDelta[k] = delta
+		}
+		if baseCodes[k] == 0 && curCodes[k] > 0 {
+			out.NewErrorCodes = append(out.NewErrorCodes, k)
+		}
+		if delta > 0 {
+			out.IncreasedErrorCodes = append(out.IncreasedErrorCodes, replayCodeDelta{
+				Code:     k,
+				Baseline: baseCodes[k],
+				Current:  curCodes[k],
+				Delta:    delta,
+			})
+		}
+	}
+
 	sort.Slice(out.Regressions, func(i, j int) bool {
 		if out.Regressions[i].Path == out.Regressions[j].Path {
 			return out.Regressions[i].Kind < out.Regressions[j].Kind
 		}
 		return out.Regressions[i].Path < out.Regressions[j].Path
 	})
+	sort.Strings(out.NewErrorCodes)
+	sort.Slice(out.IncreasedErrorCodes, func(i, j int) bool {
+		return out.IncreasedErrorCodes[i].Code < out.IncreasedErrorCodes[j].Code
+	})
+	if len(out.ErrorCodeDelta) == 0 {
+		out.ErrorCodeDelta = nil
+	}
+	if len(out.NewErrorCodes) == 0 {
+		out.NewErrorCodes = nil
+	}
+	if len(out.IncreasedErrorCodes) == 0 {
+		out.IncreasedErrorCodes = nil
+	}
 	if len(out.Regressions) == 0 {
 		out.Regressions = nil
 	}
@@ -431,17 +504,29 @@ func fileState(v replayFileResult) string {
 	return "failed"
 }
 
-func evaluateGates(report *replayReport, minPassRate *float64, maxFailed *int, maxNewlyFailed *int) error {
+func evaluateGates(
+	report *replayReport,
+	minPassRate *float64,
+	maxFailed *int,
+	maxNewlyFailed *int,
+	denyErrorCodes []string,
+	maxNewErrorCodes *int,
+	maxErrorCodeRegressions *int,
+) error {
 	if report == nil {
 		return errors.New("nil report")
 	}
+	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:        minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil,
-		Passed:         true,
-		MinPassRate:    minPassRate,
-		MaxFailed:      maxFailed,
-		MaxNewlyFailed: maxNewlyFailed,
-		Failures:       nil,
+		Enabled:                 minPassRate != nil || maxFailed != nil || maxNewlyFailed != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Passed:                  true,
+		MinPassRate:             minPassRate,
+		MaxFailed:               maxFailed,
+		MaxNewlyFailed:          maxNewlyFailed,
+		DenyErrorCodes:          denyErrorCodes,
+		MaxNewErrorCodes:        maxNewErrorCodes,
+		MaxErrorCodeRegressions: maxErrorCodeRegressions,
+		Failures:                nil,
 	}
 	if !report.Gate.Enabled {
 		return nil
@@ -460,6 +545,28 @@ func evaluateGates(report *replayReport, minPassRate *float64, maxFailed *int, m
 		} else if report.Baseline.NewlyFailed > *maxNewlyFailed {
 			report.Gate.Failures = append(report.Gate.Failures,
 				fmt.Sprintf("newly_failed %d > max_newly_failed %d", report.Baseline.NewlyFailed, *maxNewlyFailed))
+		}
+	}
+	for _, code := range denyErrorCodes {
+		if n := report.Summary.ErrorCodes[code]; n > 0 {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("error_code %s present %d time(s)", code, n))
+		}
+	}
+	if maxNewErrorCodes != nil {
+		if report.Baseline == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_new_error_codes gate requires baseline diff")
+		} else if len(report.Baseline.NewErrorCodes) > *maxNewErrorCodes {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("new_error_codes %d > max_new_error_codes %d", len(report.Baseline.NewErrorCodes), *maxNewErrorCodes))
+		}
+	}
+	if maxErrorCodeRegressions != nil {
+		if report.Baseline == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_error_code_regressions gate requires baseline diff")
+		} else if len(report.Baseline.IncreasedErrorCodes) > *maxErrorCodeRegressions {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("error_code_regressions %d > max_error_code_regressions %d", len(report.Baseline.IncreasedErrorCodes), *maxErrorCodeRegressions))
 		}
 	}
 	if len(report.Gate.Failures) == 0 {
@@ -481,6 +588,19 @@ func parseMode(v string) (olecfb.ParseMode, error) {
 }
 
 func parseExtensions(csv string) []string {
+	parts := parseCSVTokens(csv)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(p)
+		if !strings.HasPrefix(p, ".") {
+			p = "." + p
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func parseCSVTokens(csv string) []string {
 	csv = strings.TrimSpace(csv)
 	if csv == "" {
 		return nil
@@ -488,15 +608,73 @@ func parseExtensions(csv string) []string {
 	parts := strings.Split(csv, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		p = strings.ToLower(strings.TrimSpace(p))
+		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		if !strings.HasPrefix(p, ".") {
-			p = "." + p
-		}
 		out = append(out, p)
 	}
+	return out
+}
+
+func normalizeCodes(codes []string) []string {
+	if len(codes) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(codes))
+	for _, c := range codes {
+		c = strings.ToUpper(strings.TrimSpace(c))
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func collectErrorCodeCounts(files []replayFileResult) map[string]int {
+	out := map[string]int{}
+	for _, f := range files {
+		if f.Success {
+			continue
+		}
+		code := strings.TrimSpace(f.ErrorCode)
+		if code == "" {
+			code = "UNKNOWN"
+		}
+		code = strings.ToUpper(code)
+		out[code]++
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sortedUnionKeys(a, b map[string]int) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(a)+len(b))
+	for k := range a {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	for k := range b {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 

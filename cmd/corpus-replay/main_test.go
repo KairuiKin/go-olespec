@@ -43,6 +43,9 @@ func TestRunReplayMixedCorpus(t *testing.T) {
 	if len(rep.Files) != 2 {
 		t.Fatalf("unexpected file entries: %d", len(rep.Files))
 	}
+	if len(rep.Summary.ErrorCodes) == 0 {
+		t.Fatal("expected error code summary")
+	}
 }
 
 func TestRunReplayOutputFile(t *testing.T) {
@@ -146,6 +149,96 @@ func TestRunReplayMaxNewlyFailedRequiresBaseline(t *testing.T) {
 	err := run([]string{"-max-newly-failed", "0"}, &out)
 	if err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestRunReplayDenyErrorCodesGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+
+	var probe bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb"}, &probe); err != nil {
+		t.Fatalf("probe run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(probe.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal probe returned error: %v", err)
+	}
+	code := ""
+	for k := range rep.Summary.ErrorCodes {
+		code = k
+		break
+	}
+	if code == "" {
+		t.Fatal("expected at least one error code")
+	}
+
+	var out bytes.Buffer
+	err := run([]string{"-root", root, "-ext", ".cfb", "-deny-error-codes", code}, &out)
+	if err == nil {
+		t.Fatal("expected deny-error-codes gate failure")
+	}
+	var rep2 replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep2); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep2.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayErrorCodeBaselineGates(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.cfb")
+	if err := os.WriteFile(target, buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile target returned error: %v", err)
+	}
+	baselinePath := filepath.Join(root, "baseline.json")
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-output", baselinePath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("baseline run returned error: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("bad"), 0o644); err != nil {
+		t.Fatalf("overwrite target returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-baseline", baselinePath,
+		"-max-new-error-codes", "0",
+		"-max-error-code-regressions", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected error-code baseline gate failure")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Baseline == nil {
+		t.Fatal("expected baseline")
+	}
+	if len(rep.Baseline.NewErrorCodes) == 0 {
+		t.Fatal("expected new error codes")
+	}
+	if len(rep.Baseline.IncreasedErrorCodes) == 0 {
+		t.Fatal("expected increased error codes")
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayErrorCodeGatesRequireBaseline(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-max-new-error-codes", "0"}, &out); err == nil {
+		t.Fatal("expected max-new-error-codes validation error")
+	}
+	if err := run([]string{"-max-error-code-regressions", "0"}, &out); err == nil {
+		t.Fatal("expected max-error-code-regressions validation error")
 	}
 }
 

@@ -21,6 +21,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .doc,.xls,.ppt,.cfb -mode lenien
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -max-newly-failed 0 -min-pass-rate 0.98
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -max-new-error-codes 0 -max-error-code-regressions 0 -deny-error-codes BAD_HEADER,DIR_CORRUPT
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)
