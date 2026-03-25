@@ -91,6 +91,66 @@ func (ps PropertySet) GetTime(id uint32) (time.Time, bool) {
 	return v, ok
 }
 
+func (ps *PropertySet) SetString(id uint32, value string) {
+	ps.upsert(Property{
+		ID:    id,
+		Type:  VTLPWSTR,
+		Value: value,
+	})
+}
+
+func (ps *PropertySet) SetInt64(id uint32, value int64) {
+	ps.upsert(Property{
+		ID:    id,
+		Type:  VTI8,
+		Value: value,
+	})
+}
+
+func (ps *PropertySet) SetUint64(id uint32, value uint64) {
+	ps.upsert(Property{
+		ID:    id,
+		Type:  VTUI8,
+		Value: value,
+	})
+}
+
+func (ps *PropertySet) SetBool(id uint32, value bool) {
+	ps.upsert(Property{
+		ID:    id,
+		Type:  VTBool,
+		Value: value,
+	})
+}
+
+func (ps *PropertySet) SetTime(id uint32, value time.Time) {
+	ps.upsert(Property{
+		ID:    id,
+		Type:  VTFiletime,
+		Value: value.UTC(),
+	})
+}
+
+func (ps *PropertySet) Delete(id uint32) {
+	if ps == nil || ps.Properties == nil {
+		return
+	}
+	delete(ps.Properties, id)
+	ps.Order = sortedPropertyIDs(ps.Properties)
+}
+
+func (ps *PropertySet) upsert(p Property) {
+	if ps == nil {
+		return
+	}
+	if ps.Properties == nil {
+		ps.Properties = map[uint32]Property{}
+	}
+	p.Raw = nil // recompute on marshal from typed value.
+	ps.Properties[p.ID] = p
+	ps.Order = sortedPropertyIDs(ps.Properties)
+}
+
 type Stream struct {
 	ByteOrder        uint16
 	Version          uint16

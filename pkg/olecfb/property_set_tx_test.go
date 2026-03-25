@@ -22,11 +22,7 @@ func TestTxPutPropertySet(t *testing.T) {
 	if !ok {
 		t.Fatal("SummaryInformation set not found")
 	}
-	set.Properties[oleps.PIDTitle] = oleps.Property{
-		ID:    oleps.PIDTitle,
-		Type:  oleps.VTLPWSTR,
-		Value: "Edited Title",
-	}
+	set.SetString(oleps.PIDTitle, "Edited Title")
 
 	tx, err := f.Begin(TxOptions{})
 	if err != nil {
@@ -63,11 +59,7 @@ func TestTxPutSummaryInformation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSummaryInformation returned error: %v", err)
 	}
-	set.Properties[oleps.PIDTitle] = oleps.Property{
-		ID:    oleps.PIDTitle,
-		Type:  oleps.VTLPWSTR,
-		Value: "Edited via convenience",
-	}
+	set.SetString(oleps.PIDTitle, "Edited via convenience")
 	tx, err := f.Begin(TxOptions{})
 	if err != nil {
 		t.Fatalf("Begin returned error: %v", err)
@@ -99,11 +91,7 @@ func TestTxPutDocumentSummaryInformation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDocumentSummaryInformation returned error: %v", err)
 	}
-	set.Properties[oleps.PIDAuthor] = oleps.Property{
-		ID:    oleps.PIDAuthor,
-		Type:  oleps.VTLPWSTR,
-		Value: "Edited Author",
-	}
+	set.SetString(oleps.PIDAuthor, "Edited Author")
 	tx, err := f.Begin(TxOptions{})
 	if err != nil {
 		t.Fatalf("Begin returned error: %v", err)

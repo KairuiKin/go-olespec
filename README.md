@@ -32,6 +32,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - Property set parsing:
   - parse property set stream header and sets
   - read SummaryInformation / DocumentSummaryInformation fields (string/int/time basic types)
+  - property mutation helpers (`SetString/SetInt64/SetBool/SetTime/Delete`)
   - marshal/write property set streams via transaction (`Tx.PutPropertySet`)
   - convenience write helpers: `Tx.PutSummaryInformation` / `Tx.PutDocumentSummaryInformation`
 - Transaction (v1):
