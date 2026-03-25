@@ -65,12 +65,14 @@ func ExtractBackendToDir(rb storage.ReadBackend, dstDir string, openOpt olecfb.O
   - `flat`（默认）：平铺文件
   - `tree`：按 artifact 路径拆目录（`!` 转为 `_ole_` 目录层）
 - `WriteOptions.WriteManifest=true` 时额外写出 `manifest.json`（可用 `ManifestName` 自定义文件名）。
+- `WriteOptions.AtomicPublish=true` 时使用 staging + rename 发布（当前仅支持 `Overwrite=false`）。
 - `ManifestName` 必须是纯文件名（不可含路径分隔符、不可为绝对路径）。
 - 对 `ArtifactOleObj`/`ArtifactStream` 且存在 `OLEFileName` 的条目，写盘后缀优先使用 `OLEFileName` 的安全扩展名（如 `.txt`）。
 - `WriteResult.Files[*].RelativePath` 和 manifest 的 `relative_path` 为相对 `dstDir` 的稳定路径映射。
 - 路径段会规避 Windows 保留名（如 `CON`/`PRN`/`AUX`/`NUL`/`COM1`/`LPT1`）以保证跨平台可写性。
 - 当 `Overwrite=false` 时，先做全量冲突预检；若有冲突则不写入任何 artifact 文件。
 - 当 `Overwrite=false` 且写入阶段发生错误（包括 manifest 写入失败）时，会回滚已写入 artifact 文件。
+- `AtomicPublish` 下发布阶段 rename 失败返回 `COMMIT_FAILED`，并回滚已发布 artifact 文件。
 
 `oleds` 基础解析 API：
 

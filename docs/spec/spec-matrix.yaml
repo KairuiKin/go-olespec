@@ -123,6 +123,8 @@ items:
       - "integration/write_artifacts_ole_filename_ext"
       - "integration/write_artifacts_write_failure_rollback"
       - "integration/write_artifacts_manifest_failure_rollback"
+      - "integration/write_artifacts_atomic_publish"
+      - "integration/write_artifacts_atomic_publish_rename_failure_rollback"
       - "integration/extract_file_to_dir"
 
   - id: PERF-001

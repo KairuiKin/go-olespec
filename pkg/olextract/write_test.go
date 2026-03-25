@@ -246,6 +246,87 @@ func TestWriteArtifactsManifestNameTraversalRejected(t *testing.T) {
 	}
 }
 
+func TestWriteArtifactsAtomicPublish(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+			{Path: "/B", Kind: olecfb.ArtifactStream, Raw: []byte("bbb")},
+		},
+	}
+	outDir := t.TempDir()
+	res, err := WriteArtifacts(rep, outDir, WriteOptions{
+		AtomicPublish: true,
+		WriteManifest: true,
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifacts returned error: %v", err)
+	}
+	if res.FilesWritten != 2 {
+		t.Fatalf("unexpected files written: %d", res.FilesWritten)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000000_A.bin")); err != nil {
+		t.Fatalf("missing output A: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000001_B.bin")); err != nil {
+		t.Fatalf("missing output B: %v", err)
+	}
+	if res.ManifestPath == "" {
+		t.Fatal("expected manifest path")
+	}
+}
+
+func TestWriteArtifactsAtomicPublishRejectsOverwrite(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+		},
+	}
+	if _, err := WriteArtifacts(rep, t.TempDir(), WriteOptions{
+		AtomicPublish: true,
+		Overwrite:     true,
+	}); err == nil {
+		t.Fatal("expected invalid argument error")
+	} else if !olecfb.IsCode(err, olecfb.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestWriteArtifactsAtomicPublishRenameFailureRollsBack(t *testing.T) {
+	rep := &olecfb.ExtractReport{
+		Artifacts: []olecfb.Artifact{
+			{Path: "/A", Kind: olecfb.ArtifactStream, Raw: []byte("aaa")},
+			{Path: "/B", Kind: olecfb.ArtifactStream, Raw: []byte("bbb")},
+		},
+	}
+	outDir := t.TempDir()
+	origRenameFile := renameFile
+	renameCount := 0
+	renameFile = func(oldpath, newpath string) error {
+		renameCount++
+		if renameCount == 2 {
+			return errors.New("forced rename failure")
+		}
+		return origRenameFile(oldpath, newpath)
+	}
+	defer func() { renameFile = origRenameFile }()
+
+	if _, err := WriteArtifacts(rep, outDir, WriteOptions{AtomicPublish: true}); err == nil {
+		t.Fatal("expected atomic publish failure")
+	} else if !olecfb.IsCode(err, olecfb.ErrCommitFailed) {
+		t.Fatalf("expected ErrCommitFailed, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000000_A.bin")); err == nil {
+		t.Fatal("expected rollback to remove A after rename failure")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "000001_B.bin")); err == nil {
+		t.Fatal("expected B not to be published")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
 func TestWriteArtifactsWriteFailureRollsBack(t *testing.T) {
 	rep := &olecfb.ExtractReport{
 		Artifacts: []olecfb.Artifact{

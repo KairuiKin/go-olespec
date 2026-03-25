@@ -8,7 +8,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/KairuiKin/go-olespec/pkg/olecfb"
@@ -20,6 +22,7 @@ type WriteOptions struct {
 	Layout        WriteLayout
 	WriteManifest bool
 	ManifestName  string
+	AtomicPublish bool
 }
 
 type WrittenFile struct {
@@ -52,6 +55,7 @@ type writePlan struct {
 }
 
 var writeFile = os.WriteFile
+var renameFile = os.Rename
 
 // WriteArtifacts writes artifact raw payloads to a directory with deterministic paths.
 // Artifacts without Raw payload are skipped.
@@ -90,6 +94,14 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 		return WriteResult{}, &olecfb.OLEError{
 			Code:    olecfb.ErrInvalidArgument,
 			Message: "unsupported write layout",
+			Op:      "olextract.write_artifacts",
+			Offset:  -1,
+		}
+	}
+	if opt.AtomicPublish && opt.Overwrite {
+		return WriteResult{}, &olecfb.OLEError{
+			Code:    olecfb.ErrInvalidArgument,
+			Message: "atomic publish does not support overwrite=true",
 			Op:      "olextract.write_artifacts",
 			Offset:  -1,
 		}
@@ -166,6 +178,15 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 		}
 	}
 
+	if opt.AtomicPublish {
+		var err error
+		out, err = writeArtifactsAtomic(dstDir, plans, report, manifestPath, out.Skipped)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		return out, nil
+	}
+
 	for _, plan := range plans {
 		if err := os.MkdirAll(filepath.Dir(plan.abs), 0o755); err != nil {
 			return WriteResult{}, &olecfb.OLEError{
@@ -209,6 +230,133 @@ func WriteArtifacts(report *olecfb.ExtractReport, dstDir string, opt WriteOption
 			return WriteResult{}, &olecfb.OLEError{
 				Code:    olecfb.ErrUnsupported,
 				Message: "write manifest failed",
+				Op:      "olextract.write_artifacts",
+				Path:    manifestPath,
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+		out.ManifestPath = manifestPath
+	}
+	return out, nil
+}
+
+func writeArtifactsAtomic(dstDir string, plans []writePlan, report *olecfb.ExtractReport, manifestPath string, skipped int) (WriteResult, error) {
+	stageDir := filepath.Join(dstDir, ".olespec-stage-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return WriteResult{}, &olecfb.OLEError{
+			Code:    olecfb.ErrUnsupported,
+			Message: "create stage directory failed",
+			Op:      "olextract.write_artifacts",
+			Path:    stageDir,
+			Offset:  -1,
+			Cause:   err,
+		}
+	}
+	defer os.RemoveAll(stageDir)
+
+	out := WriteResult{Skipped: skipped}
+	stageAbsByRel := map[string]string{}
+	for _, plan := range plans {
+		stageAbs := filepath.Join(stageDir, plan.rel)
+		stageAbsByRel[plan.rel] = stageAbs
+		if err := os.MkdirAll(filepath.Dir(stageAbs), 0o755); err != nil {
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrUnsupported,
+				Message: "create stage sub directory failed",
+				Op:      "olextract.write_artifacts",
+				Path:    filepath.Dir(stageAbs),
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+		if err := writeFile(stageAbs, plan.artifact.Raw, 0o644); err != nil {
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrUnsupported,
+				Message: "write stage artifact file failed",
+				Op:      "olextract.write_artifacts",
+				Path:    stageAbs,
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+	}
+
+	stageManifest := ""
+	if manifestPath != "" {
+		stageManifest = filepath.Join(stageDir, filepath.Base(manifestPath))
+		preview := WriteResult{
+			FilesWritten: len(plans),
+			BytesWritten: 0,
+			Files:        make([]WrittenFile, 0, len(plans)),
+		}
+		for _, plan := range plans {
+			sz := int64(len(plan.artifact.Raw))
+			preview.BytesWritten += sz
+			preview.Files = append(preview.Files, WrittenFile{
+				ArtifactID:   plan.artifact.ID,
+				ArtifactPath: plan.artifact.Path,
+				RelativePath: plan.rel,
+				FilePath:     plan.abs,
+				Size:         sz,
+			})
+		}
+		if err := writeManifestFile(stageManifest, report, preview); err != nil {
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrUnsupported,
+				Message: "write stage manifest failed",
+				Op:      "olextract.write_artifacts",
+				Path:    stageManifest,
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+	}
+
+	committed := make([]WrittenFile, 0, len(plans))
+	for _, plan := range plans {
+		stageAbs := stageAbsByRel[plan.rel]
+		if err := os.MkdirAll(filepath.Dir(plan.abs), 0o755); err != nil {
+			rollbackWrittenFiles(committed)
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrCommitFailed,
+				Message: "create destination sub directory failed during atomic publish",
+				Op:      "olextract.write_artifacts",
+				Path:    filepath.Dir(plan.abs),
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+		if err := renameFile(stageAbs, plan.abs); err != nil {
+			rollbackWrittenFiles(committed)
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrCommitFailed,
+				Message: "atomic publish rename failed",
+				Op:      "olextract.write_artifacts",
+				Path:    plan.abs,
+				Offset:  -1,
+				Cause:   err,
+			}
+		}
+		wf := WrittenFile{
+			ArtifactID:   plan.artifact.ID,
+			ArtifactPath: plan.artifact.Path,
+			RelativePath: plan.rel,
+			FilePath:     plan.abs,
+			Size:         int64(len(plan.artifact.Raw)),
+		}
+		committed = append(committed, wf)
+		out.Files = append(out.Files, wf)
+		out.FilesWritten++
+		out.BytesWritten += wf.Size
+	}
+
+	if manifestPath != "" {
+		if err := renameFile(stageManifest, manifestPath); err != nil {
+			rollbackWrittenFiles(committed)
+			return WriteResult{}, &olecfb.OLEError{
+				Code:    olecfb.ErrCommitFailed,
+				Message: "atomic publish manifest rename failed",
 				Op:      "olextract.write_artifacts",
 				Path:    manifestPath,
 				Offset:  -1,

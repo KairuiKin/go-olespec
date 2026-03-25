@@ -8,7 +8,7 @@ Core library for OLE/CFB specification-driven parsing, editing, and extraction i
 - `pkg/oledoc`: UI-agnostic document view model contracts
 - `pkg/oleps`: OLE property set stream parser (minimal)
 - `pkg/oleds`: OLE object stream detection + Ole10Native parser
-- `pkg/olextract`: extraction-oriented convenience facade (`ExtractBackend`/`ExtractBytes`/`ExtractFile`/`ExtractReader`) and artifact write-out helpers (`WriteArtifacts`/`Extract*ToDir`, flat/tree layout + manifest)
+- `pkg/olextract`: extraction-oriented convenience facade (`ExtractBackend`/`ExtractBytes`/`ExtractFile`/`ExtractReader`) and artifact write-out helpers (`WriteArtifacts`/`Extract*ToDir`, flat/tree layout + manifest + optional atomic publish)
 
 ## Implemented so far (`pkg/olecfb`)
 
