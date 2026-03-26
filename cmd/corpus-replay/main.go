@@ -214,8 +214,8 @@ func run(args []string, out io.Writer) error {
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|artifacts-failed-desc|warnings-desc|error-code|failed-first")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
-		reportErrorCodes        = fset.String("report-error-codes", "", "comma-separated error codes to include in report file entries after report-files policy")
-		reportExcludeErrorCodes = fset.String("report-exclude-error-codes", "", "comma-separated error codes to exclude from report file entries after report-files policy")
+		reportErrorCodes        = fset.String("report-error-codes", "", "comma-separated error code patterns to include in report file entries after report-files policy (* and ? supported)")
+		reportExcludeErrorCodes = fset.String("report-exclude-error-codes", "", "comma-separated error code patterns to exclude from report file entries after report-files policy (* and ? supported)")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
@@ -351,8 +351,14 @@ func run(args []string, out io.Writer) error {
 		return errors.New("max-truncated-matches must be >= -1")
 	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
-	reportIncludeCodes := normalizeCodes(parseCSVTokens(*reportErrorCodes))
-	reportExcludeCodes := normalizeCodes(parseCSVTokens(*reportExcludeErrorCodes))
+	reportIncludeCodes, err := parseErrorCodePatterns(*reportErrorCodes, "report-error-codes")
+	if err != nil {
+		return err
+	}
+	reportExcludeCodes, err := parseErrorCodePatterns(*reportExcludeErrorCodes, "report-exclude-error-codes")
+	if err != nil {
+		return err
+	}
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
 	if err != nil {
 		return err
@@ -1327,6 +1333,22 @@ func parsePathGlobs(csv, flagName string) ([]string, error) {
 	return out, nil
 }
 
+func parseErrorCodePatterns(csv, flagName string) ([]string, error) {
+	patterns := normalizeCodes(parseCSVTokens(csv))
+	if len(patterns) == 0 {
+		return nil, nil
+	}
+	for _, p := range patterns {
+		if !strings.ContainsAny(p, "*?[") {
+			continue
+		}
+		if _, err := path.Match(p, "PROBE_CODE"); err != nil {
+			return nil, fmt.Errorf("invalid %s pattern %q: %w", flagName, p, err)
+		}
+	}
+	return patterns, nil
+}
+
 func matchesPathFilters(rel string, include, exclude []string) bool {
 	rel = filepath.ToSlash(strings.TrimSpace(rel))
 	if len(include) > 0 {
@@ -1413,26 +1435,16 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 		// unreachable if parsed through parseReportFilesPolicy
 	}
 	if len(includeCodes) > 0 || len(excludeCodes) > 0 {
-		includeSet := map[string]struct{}{}
-		excludeSet := map[string]struct{}{}
-		for _, code := range includeCodes {
-			includeSet[code] = struct{}{}
-		}
-		for _, code := range excludeCodes {
-			excludeSet[code] = struct{}{}
-		}
 		filtered := make([]replayFileResult, 0, len(report.Files))
 		for _, f := range report.Files {
 			code := normalizeReportErrorCode(f)
-			if len(includeSet) > 0 {
-				if _, ok := includeSet[code]; !ok {
+			if len(includeCodes) > 0 {
+				if !matchesErrorCodePatterns(code, includeCodes) {
 					continue
 				}
 			}
-			if len(excludeSet) > 0 {
-				if _, ok := excludeSet[code]; ok {
-					continue
-				}
+			if len(excludeCodes) > 0 && matchesErrorCodePatterns(code, excludeCodes) {
+				continue
 			}
 			filtered = append(filtered, f)
 		}
@@ -1537,6 +1549,25 @@ func normalizeReportErrorCode(file replayFileResult) string {
 		return "UNKNOWN"
 	}
 	return code
+}
+
+func matchesErrorCodePatterns(code string, patterns []string) bool {
+	if len(patterns) == 0 || code == "" {
+		return false
+	}
+	for _, p := range patterns {
+		if strings.ContainsAny(p, "*?[") {
+			ok, _ := path.Match(p, code)
+			if ok {
+				return true
+			}
+			continue
+		}
+		if p == code {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeCodes(codes []string) []string {

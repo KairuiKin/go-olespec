@@ -519,6 +519,38 @@ func TestRunReplayReportErrorCodesInclude(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportErrorCodesIncludePattern(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	code := probeFirstReplayErrorCode(t, root)
+	pattern := strings.ToLower(code[:1]) + "*"
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-files", "all",
+		"-report-error-codes", pattern,
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 || rep.Files[0].Path != "bad.cfb" {
+		t.Fatalf("unexpected files with pattern include: %+v", rep.Files)
+	}
+	if len(rep.Options.ReportErrorCodes) != 1 || rep.Options.ReportErrorCodes[0] != strings.ToUpper(pattern) {
+		t.Fatalf("unexpected report error code pattern options: %+v", rep.Options.ReportErrorCodes)
+	}
+}
+
 func TestRunReplayReportErrorCodesExclude(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
@@ -749,6 +781,12 @@ func TestRunReplayReportFilesInvalid(t *testing.T) {
 	}
 	if err := run([]string{"-report-limit", "-2"}, &out); err == nil {
 		t.Fatal("expected report-limit validation error")
+	}
+	if err := run([]string{"-report-error-codes", "["}, &out); err == nil {
+		t.Fatal("expected report-error-codes pattern validation error")
+	}
+	if err := run([]string{"-report-exclude-error-codes", "["}, &out); err == nil {
+		t.Fatal("expected report-exclude-error-codes pattern validation error")
 	}
 }
 

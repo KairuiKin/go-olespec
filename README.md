@@ -126,7 +126,7 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -repor
 ```
 
 ```bash
-go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -report-error-codes BAD_HEADER,UNKNOWN -report-exclude-error-codes DIR_CORRUPT
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -report-error-codes BAD_*,UNKNOWN -report-exclude-error-codes DIR_CORRUPT
 ```
 
 ```bash
