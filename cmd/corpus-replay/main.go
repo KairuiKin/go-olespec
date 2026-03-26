@@ -65,23 +65,24 @@ type replayFileResult struct {
 }
 
 type replaySummary struct {
-	ScannedFiles     int            `json:"scanned_files"`
-	MatchedFiles     int            `json:"matched_files"`
-	TruncatedMatches int            `json:"truncated_matches,omitempty"`
-	FilteredByExt    int            `json:"filtered_by_ext,omitempty"`
-	FilteredByPath   int            `json:"filtered_by_path,omitempty"`
-	FilteredBySize   int            `json:"filtered_by_size,omitempty"`
-	Processed        int            `json:"processed"`
-	Success          int            `json:"success"`
-	Failed           int            `json:"failed"`
-	Partial          int            `json:"partial"`
-	WarningFiles     int            `json:"warning_files"`
-	WarningsTotal    int            `json:"warnings_total"`
-	ReportedFiles    int            `json:"reported_files"`
-	OmittedFiles     int            `json:"omitted_files"`
-	PassRate         float64        `json:"pass_rate"`
-	DurationMS       int64          `json:"duration_ms"`
-	ErrorCodes       map[string]int `json:"error_codes,omitempty"`
+	ScannedFiles      int            `json:"scanned_files"`
+	MatchedFiles      int            `json:"matched_files"`
+	MatchedFilesTotal int            `json:"matched_files_total,omitempty"`
+	TruncatedMatches  int            `json:"truncated_matches,omitempty"`
+	FilteredByExt     int            `json:"filtered_by_ext,omitempty"`
+	FilteredByPath    int            `json:"filtered_by_path,omitempty"`
+	FilteredBySize    int            `json:"filtered_by_size,omitempty"`
+	Processed         int            `json:"processed"`
+	Success           int            `json:"success"`
+	Failed            int            `json:"failed"`
+	Partial           int            `json:"partial"`
+	WarningFiles      int            `json:"warning_files"`
+	WarningsTotal     int            `json:"warnings_total"`
+	ReportedFiles     int            `json:"reported_files"`
+	OmittedFiles      int            `json:"omitted_files"`
+	PassRate          float64        `json:"pass_rate"`
+	DurationMS        int64          `json:"duration_ms"`
+	ErrorCodes        map[string]int `json:"error_codes,omitempty"`
 }
 
 type replayReport struct {
@@ -159,6 +160,7 @@ type replayGateResult struct {
 	MinScannedFiles         *int     `json:"min_scanned_files,omitempty"`
 	MaxScannedFiles         *int     `json:"max_scanned_files,omitempty"`
 	MinMatchedFiles         *int     `json:"min_matched_files,omitempty"`
+	MaxMatchedFilesTotal    *int     `json:"max_matched_files_total,omitempty"`
 	MaxTruncatedMatches     *int     `json:"max_truncated_matches,omitempty"`
 	MinProcessed            *int     `json:"min_processed,omitempty"`
 	MaxProcessed            *int     `json:"max_processed,omitempty"`
@@ -230,6 +232,7 @@ func run(args []string, out io.Writer) error {
 		minScannedFiles         = fset.Int("min-scanned-files", -1, "gate: minimum required scanned files, negative disables")
 		maxScannedFiles         = fset.Int("max-scanned-files", -1, "gate: maximum allowed scanned files, negative disables")
 		minMatchedFiles         = fset.Int("min-matched-files", -1, "gate: minimum required matched files before replay cap, negative disables")
+		maxMatchedFilesTotal    = fset.Int("max-matched-files-total", -1, "gate: maximum allowed matched files before replay cap, negative disables")
 		maxTruncatedMatches     = fset.Int("max-truncated-matches", -1, "gate: maximum allowed truncated matches due to replay cap, negative disables")
 		minProcessed            = fset.Int("min-processed", -1, "gate: minimum required processed files, negative disables")
 		maxProcessed            = fset.Int("max-processed", -1, "gate: maximum allowed processed files, negative disables")
@@ -337,6 +340,9 @@ func run(args []string, out io.Writer) error {
 	if *minMatchedFiles < -1 {
 		return errors.New("min-matched-files must be >= -1")
 	}
+	if *maxMatchedFilesTotal < -1 {
+		return errors.New("max-matched-files-total must be >= -1")
+	}
 	if *maxTruncatedMatches < -1 {
 		return errors.New("max-truncated-matches must be >= -1")
 	}
@@ -416,6 +422,7 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 	sort.Strings(matched)
+	matchedTotal := len(matched)
 	truncatedMatches := 0
 	if *maxMatchedFiles >= 0 && len(matched) > *maxMatchedFiles {
 		truncatedMatches = len(matched) - *maxMatchedFiles
@@ -457,12 +464,13 @@ func run(args []string, out io.Writer) error {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Options:     opt,
 		Summary: replaySummary{
-			ScannedFiles:     scanned,
-			MatchedFiles:     len(matched),
-			TruncatedMatches: truncatedMatches,
-			FilteredByExt:    filteredByExt,
-			FilteredByPath:   filteredByPath,
-			FilteredBySize:   filteredBySize,
+			ScannedFiles:      scanned,
+			MatchedFiles:      len(matched),
+			MatchedFilesTotal: matchedTotal,
+			TruncatedMatches:  truncatedMatches,
+			FilteredByExt:     filteredByExt,
+			FilteredByPath:    filteredByPath,
+			FilteredBySize:    filteredBySize,
 		},
 		Files: make([]replayFileResult, 0, len(matched)),
 		Gate: replayGateResult{
@@ -594,6 +602,11 @@ func run(args []string, out io.Writer) error {
 		v := *minMatchedFiles
 		minMatchedFilesPtr = &v
 	}
+	var maxMatchedFilesTotalPtr *int
+	if *maxMatchedFilesTotal >= 0 {
+		v := *maxMatchedFilesTotal
+		maxMatchedFilesTotalPtr = &v
+	}
 	var maxTruncatedMatchesPtr *int
 	if *maxTruncatedMatches >= 0 {
 		v := *maxTruncatedMatches
@@ -694,6 +707,7 @@ func run(args []string, out io.Writer) error {
 		minScannedFilesPtr,
 		maxScannedFilesPtr,
 		minMatchedFilesPtr,
+		maxMatchedFilesTotalPtr,
 		maxTruncatedMatchesPtr,
 		minProcessedPtr,
 		maxProcessedPtr,
@@ -972,6 +986,7 @@ func evaluateGates(
 	minScannedFiles *int,
 	maxScannedFiles *int,
 	minMatchedFiles *int,
+	maxMatchedFilesTotal *int,
 	maxTruncatedMatches *int,
 	minProcessed *int,
 	maxProcessed *int,
@@ -999,11 +1014,12 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minScannedFiles != nil || maxScannedFiles != nil || minMatchedFiles != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxWarningFiles != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minScannedFiles != nil || maxScannedFiles != nil || minMatchedFiles != nil || maxMatchedFilesTotal != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxWarningFiles != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinScannedFiles:         minScannedFiles,
 		MaxScannedFiles:         maxScannedFiles,
 		MinMatchedFiles:         minMatchedFiles,
+		MaxMatchedFilesTotal:    maxMatchedFilesTotal,
 		MaxTruncatedMatches:     maxTruncatedMatches,
 		MinProcessed:            minProcessed,
 		MaxProcessed:            maxProcessed,
@@ -1038,10 +1054,17 @@ func evaluateGates(
 		report.Gate.Failures = append(report.Gate.Failures,
 			fmt.Sprintf("scanned_files %d > max_scanned_files %d", report.Summary.ScannedFiles, *maxScannedFiles))
 	}
-	matchedTotal := report.Summary.MatchedFiles + report.Summary.TruncatedMatches
+	matchedTotal := report.Summary.MatchedFilesTotal
+	if matchedTotal == 0 && (report.Summary.MatchedFiles > 0 || report.Summary.TruncatedMatches > 0) {
+		matchedTotal = report.Summary.MatchedFiles + report.Summary.TruncatedMatches
+	}
 	if minMatchedFiles != nil && matchedTotal < *minMatchedFiles {
 		report.Gate.Failures = append(report.Gate.Failures,
 			fmt.Sprintf("matched_files_total %d < min_matched_files %d", matchedTotal, *minMatchedFiles))
+	}
+	if maxMatchedFilesTotal != nil && matchedTotal > *maxMatchedFilesTotal {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("matched_files_total %d > max_matched_files_total %d", matchedTotal, *maxMatchedFilesTotal))
 	}
 	if maxTruncatedMatches != nil && report.Summary.TruncatedMatches > *maxTruncatedMatches {
 		report.Gate.Failures = append(report.Gate.Failures,

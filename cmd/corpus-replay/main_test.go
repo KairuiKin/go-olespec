@@ -835,6 +835,9 @@ func TestRunReplayMaxMatchedFiles(t *testing.T) {
 	if rep.Summary.Processed != 2 || rep.Summary.MatchedFiles != 2 {
 		t.Fatalf("unexpected processed/matched summary: %+v", rep.Summary)
 	}
+	if rep.Summary.MatchedFilesTotal != 3 {
+		t.Fatalf("unexpected matched_files_total: %d", rep.Summary.MatchedFilesTotal)
+	}
 	if rep.Summary.TruncatedMatches != 1 {
 		t.Fatalf("unexpected truncated_matches: %d", rep.Summary.TruncatedMatches)
 	}
@@ -862,6 +865,9 @@ func TestRunReplayMaxMatchedFilesValidation(t *testing.T) {
 	}
 	if err := run([]string{"-min-matched-files", "-2"}, &out); err == nil {
 		t.Fatal("expected min-matched-files validation error")
+	}
+	if err := run([]string{"-max-matched-files-total", "-2"}, &out); err == nil {
+		t.Fatal("expected max-matched-files-total validation error")
 	}
 	if err := run([]string{"-max-truncated-matches", "-2"}, &out); err == nil {
 		t.Fatal("expected max-truncated-matches validation error")
@@ -964,6 +970,38 @@ func TestRunReplayMaxTruncatedMatchesGate(t *testing.T) {
 	}
 	if rep.Summary.TruncatedMatches != 1 {
 		t.Fatalf("unexpected truncated matches: %d", rep.Summary.TruncatedMatches)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayMaxMatchedFilesTotalGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile b returned error: %v", err)
+	}
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-matched-files-total", "1",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected max-matched-files-total gate error")
+	}
+	if !strings.Contains(err.Error(), "max_matched_files_total") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.MatchedFilesTotal != 2 {
+		t.Fatalf("unexpected matched_files_total: %d", rep.Summary.MatchedFilesTotal)
 	}
 	if rep.Gate.Passed {
 		t.Fatal("expected gate fail")

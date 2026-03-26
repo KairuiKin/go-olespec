@@ -34,6 +34,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-matched-files 1000 -ma
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-matched-files-total 5000
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -max-new-error-codes 0 -max-error-code-regressions 0 -deny-error-codes BAD_HEADER,DIR_CORRUPT
 ```
 

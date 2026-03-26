@@ -26,7 +26,7 @@ Build a production-grade, spec-driven Go OLE core library that supports reliable
   - Deterministic output verification across platforms.
 - Deliverables:
   - Extended `oleds` parse APIs and compatibility tests.
-  - Corpus replay tool under `cmd/` for batch validation. (initial CLI + baseline/latest diff/gate + file-set/partial/warning/warning-file gates + error-code regression gates + trend summary + trend gates + auto trend save + auto trend prune + report-files policy(all/failed/success/partial/issues/warnings/clean/none) + report sort(path/duration-desc/size-desc/artifacts-desc/artifacts-failed-desc/warnings-desc/error-code/failed-first) + report pagination(offset+limit) + matched-file cap + scanned/matched/truncated gates + partial/warning trend gates + processed-count gates + processed trend-delta gates + include/exclude path glob filters + file-size filters + filter reason counters 已落地：`cmd/corpus-replay`)
+  - Corpus replay tool under `cmd/` for batch validation. (initial CLI + baseline/latest diff/gate + file-set/partial/warning/warning-file gates + error-code regression gates + trend summary + trend gates + auto trend save + auto trend prune + report-files policy(all/failed/success/partial/issues/warnings/clean/none) + report sort(path/duration-desc/size-desc/artifacts-desc/artifacts-failed-desc/warnings-desc/error-code/failed-first) + report pagination(offset+limit) + matched-file cap + scanned/matched-total/truncated gates + partial/warning trend gates + processed-count gates + processed trend-delta gates + include/exclude path glob filters + file-size filters + filter reason counters 已落地：`cmd/corpus-replay`)
   - Structured extraction manifest schema freeze.
 - Exit criteria:
   - Interop pass rate target >= 95% on curated corpus.
