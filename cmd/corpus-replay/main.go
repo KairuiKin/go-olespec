@@ -204,7 +204,7 @@ func run(args []string, out io.Writer) error {
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		maxMatchedFiles         = fset.Int("max-matched-files", -1, "maximum number of matched files to replay after sort, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
-		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|partial|issues|warnings|clean|none")
+		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|success|partial|issues|warnings|clean|none")
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|artifacts-failed-desc|warnings-desc|error-code|failed-first")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
@@ -1219,6 +1219,8 @@ func parseReportFilesPolicy(v string) (string, error) {
 		return "all", nil
 	case "failed":
 		return "failed", nil
+	case "success":
+		return "success", nil
 	case "partial":
 		return "partial", nil
 	case "issues":
@@ -1230,7 +1232,7 @@ func parseReportFilesPolicy(v string) (string, error) {
 	case "none":
 		return "none", nil
 	default:
-		return "", fmt.Errorf("invalid report-files %q, expected all|failed|partial|issues|warnings|clean|none", v)
+		return "", fmt.Errorf("invalid report-files %q, expected all|failed|success|partial|issues|warnings|clean|none", v)
 	}
 }
 
@@ -1312,6 +1314,14 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 		filtered := make([]replayFileResult, 0, len(report.Files))
 		for _, f := range report.Files {
 			if !f.Success {
+				filtered = append(filtered, f)
+			}
+		}
+		report.Files = filtered
+	case "success":
+		filtered := make([]replayFileResult, 0, len(report.Files))
+		for _, f := range report.Files {
+			if f.Success {
 				filtered = append(filtered, f)
 			}
 		}

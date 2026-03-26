@@ -70,6 +70,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files success
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files issues
 ```
 

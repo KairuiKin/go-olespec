@@ -104,6 +104,36 @@ func TestRunReplayReportFilesFailed(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportFilesSuccess(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-report-files", "success"}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one success file entry, got %d", len(rep.Files))
+	}
+	if !rep.Files[0].Success {
+		t.Fatal("expected success-only entries")
+	}
+	if rep.Files[0].Path != "ok.cfb" {
+		t.Fatalf("unexpected success file path: %s", rep.Files[0].Path)
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
 func TestRunReplayReportFilesNone(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
@@ -210,6 +240,32 @@ func TestRunReplayReportFilesPartial(t *testing.T) {
 	}
 	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
 		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
+func TestRunReplayReportFilesSuccessIncludePartial(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "partial.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile partial returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-artifact-size", "1",
+		"-report-files", "success",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one success file entry, got %d", len(rep.Files))
+	}
+	if !rep.Files[0].Success || !rep.Files[0].Partial {
+		t.Fatalf("expected partial success file entry, got %+v", rep.Files[0])
 	}
 }
 
