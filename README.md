@@ -38,6 +38,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/histor
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -max-processed-increase 10 -max-processed-drop 5
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -trend-dir ./reports/history -run-id $(git rev-parse --short HEAD) -save-trend
 ```
 

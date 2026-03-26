@@ -140,6 +140,7 @@ items:
       - "integration/corpus_replay_error_code_gates"
       - "integration/corpus_replay_trend_summary"
       - "integration/corpus_replay_trend_gates"
+      - "integration/corpus_replay_trend_processed_gates"
       - "integration/corpus_replay_partial_gates"
       - "integration/corpus_replay_warning_gates"
       - "integration/corpus_replay_processed_gates"

@@ -137,6 +137,7 @@ type replayTrendPoint struct {
 type replayTrendDelta struct {
 	FromGeneratedAt string  `json:"from_generated_at"`
 	ToGeneratedAt   string  `json:"to_generated_at"`
+	DeltaProcessed  int     `json:"delta_processed"`
 	DeltaPassRate   float64 `json:"delta_pass_rate"`
 	DeltaFailed     int     `json:"delta_failed"`
 	DeltaPartial    int     `json:"delta_partial"`
@@ -157,6 +158,8 @@ type replayGateResult struct {
 	MaxRemovedFiles         *int     `json:"max_removed_files,omitempty"`
 	MaxNewlyPartial         *int     `json:"max_newly_partial,omitempty"`
 	MaxPassRateDrop         *float64 `json:"max_pass_rate_drop,omitempty"`
+	MaxProcessedIncrease    *int     `json:"max_processed_increase,omitempty"`
+	MaxProcessedDrop        *int     `json:"max_processed_drop,omitempty"`
 	MaxFailedIncrease       *int     `json:"max_failed_increase,omitempty"`
 	MaxPartialIncrease      *int     `json:"max_partial_increase,omitempty"`
 	MaxWarningIncrease      *int     `json:"max_warning_increase,omitempty"`
@@ -217,6 +220,8 @@ func run(args []string, out io.Writer) error {
 		maxRemovedFiles         = fset.Int("max-removed-files", -1, "gate: maximum allowed removed files vs baseline, negative disables")
 		maxNewlyPartial         = fset.Int("max-newly-partial", -1, "gate: maximum allowed newly partial files vs baseline, negative disables")
 		maxPassRateDrop         = fset.Float64("max-pass-rate-drop", -1, "gate: maximum allowed pass-rate drop vs latest trend point in [0,1], negative disables")
+		maxProcessedIncrease    = fset.Int("max-processed-increase", -1, "gate: maximum allowed processed-files increase vs latest trend point, negative disables")
+		maxProcessedDrop        = fset.Int("max-processed-drop", -1, "gate: maximum allowed processed-files drop vs latest trend point, negative disables")
 		maxFailedIncrease       = fset.Int("max-failed-increase", -1, "gate: maximum allowed failed-files increase vs latest trend point, negative disables")
 		maxPartialIncrease      = fset.Int("max-partial-increase", -1, "gate: maximum allowed partial-files increase vs latest trend point, negative disables")
 		maxWarningIncrease      = fset.Int("max-warning-increase", -1, "gate: maximum allowed warning-count increase vs latest trend point, negative disables")
@@ -257,6 +262,12 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxPassRateDrop >= 0 && trendDirTrim == "" {
 		return errors.New("max-pass-rate-drop requires -trend-dir")
+	}
+	if *maxProcessedIncrease >= 0 && trendDirTrim == "" {
+		return errors.New("max-processed-increase requires -trend-dir")
+	}
+	if *maxProcessedDrop >= 0 && trendDirTrim == "" {
+		return errors.New("max-processed-drop requires -trend-dir")
 	}
 	if *maxFailedIncrease >= 0 && trendDirTrim == "" {
 		return errors.New("max-failed-increase requires -trend-dir")
@@ -541,6 +552,16 @@ func run(args []string, out io.Writer) error {
 		v := *maxPassRateDrop
 		maxPassRateDropPtr = &v
 	}
+	var maxProcessedIncreasePtr *int
+	if *maxProcessedIncrease >= 0 {
+		v := *maxProcessedIncrease
+		maxProcessedIncreasePtr = &v
+	}
+	var maxProcessedDropPtr *int
+	if *maxProcessedDrop >= 0 {
+		v := *maxProcessedDrop
+		maxProcessedDropPtr = &v
+	}
 	var maxFailedIncreasePtr *int
 	if *maxFailedIncrease >= 0 {
 		v := *maxFailedIncrease
@@ -579,6 +600,8 @@ func run(args []string, out io.Writer) error {
 		maxRemovedFilesPtr,
 		maxNewlyPartialPtr,
 		maxPassRateDropPtr,
+		maxProcessedIncreasePtr,
+		maxProcessedDropPtr,
 		maxFailedIncreasePtr,
 		maxPartialIncreasePtr,
 		maxWarningIncreasePtr,
@@ -850,6 +873,8 @@ func evaluateGates(
 	maxRemovedFiles *int,
 	maxNewlyPartial *int,
 	maxPassRateDrop *float64,
+	maxProcessedIncrease *int,
+	maxProcessedDrop *int,
 	maxFailedIncrease *int,
 	maxPartialIncrease *int,
 	maxWarningIncrease *int,
@@ -862,7 +887,7 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinProcessed:            minProcessed,
 		MaxProcessed:            maxProcessed,
@@ -875,6 +900,8 @@ func evaluateGates(
 		MaxRemovedFiles:         maxRemovedFiles,
 		MaxNewlyPartial:         maxNewlyPartial,
 		MaxPassRateDrop:         maxPassRateDrop,
+		MaxProcessedIncrease:    maxProcessedIncrease,
+		MaxProcessedDrop:        maxProcessedDrop,
 		MaxFailedIncrease:       maxFailedIncrease,
 		MaxPartialIncrease:      maxPartialIncrease,
 		MaxWarningIncrease:      maxWarningIncrease,
@@ -950,6 +977,25 @@ func evaluateGates(
 			if drop > *maxPassRateDrop {
 				report.Gate.Failures = append(report.Gate.Failures,
 					fmt.Sprintf("pass_rate_drop %.6f > max_pass_rate_drop %.6f", drop, *maxPassRateDrop))
+			}
+		}
+	}
+	if maxProcessedIncrease != nil {
+		if report.Trend == nil || report.Trend.LatestDelta == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_processed_increase gate requires trend latest delta")
+		} else if report.Trend.LatestDelta.DeltaProcessed > *maxProcessedIncrease {
+			report.Gate.Failures = append(report.Gate.Failures,
+				fmt.Sprintf("processed_increase %d > max_processed_increase %d", report.Trend.LatestDelta.DeltaProcessed, *maxProcessedIncrease))
+		}
+	}
+	if maxProcessedDrop != nil {
+		if report.Trend == nil || report.Trend.LatestDelta == nil {
+			report.Gate.Failures = append(report.Gate.Failures, "max_processed_drop gate requires trend latest delta")
+		} else {
+			drop := -report.Trend.LatestDelta.DeltaProcessed
+			if drop > *maxProcessedDrop {
+				report.Gate.Failures = append(report.Gate.Failures,
+					fmt.Sprintf("processed_drop %d > max_processed_drop %d", drop, *maxProcessedDrop))
 			}
 		}
 	}
@@ -1288,6 +1334,7 @@ func buildTrend(dir string, limit int, current replayReport) (*replayTrend, erro
 		out.LatestDelta = &replayTrendDelta{
 			FromGeneratedAt: prev.GeneratedAt,
 			ToGeneratedAt:   last.GeneratedAt,
+			DeltaProcessed:  last.Processed - prev.Processed,
 			DeltaPassRate:   last.PassRate - prev.PassRate,
 			DeltaFailed:     last.Failed - prev.Failed,
 			DeltaPartial:    last.Partial - prev.Partial,
