@@ -178,6 +178,41 @@ func TestRunReplayReportFilesIssuesIncludePartial(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportFilesWarnings(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "warn.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile warn returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-artifact-size", "1",
+		"-report-files", "warnings",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one warning file entry, got %d", len(rep.Files))
+	}
+	if rep.Files[0].Warnings == 0 {
+		t.Fatalf("expected warning entry, got %+v", rep.Files[0])
+	}
+	if rep.Files[0].Path != "warn.cfb" {
+		t.Fatalf("expected warn.cfb entry, got %s", rep.Files[0].Path)
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
 func TestRunReplayReportFilesInvalid(t *testing.T) {
 	var out bytes.Buffer
 	if err := run([]string{"-report-files", "bad"}, &out); err == nil {
