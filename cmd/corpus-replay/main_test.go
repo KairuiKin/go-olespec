@@ -689,6 +689,53 @@ func TestRunReplayFileSizeFilterValidation(t *testing.T) {
 	}
 }
 
+func TestRunReplayMaxMatchedFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile b returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "c.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile c returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-matched-files", "2",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 2 || rep.Summary.MatchedFiles != 2 {
+		t.Fatalf("unexpected processed/matched summary: %+v", rep.Summary)
+	}
+	if rep.Summary.TruncatedMatches != 1 {
+		t.Fatalf("unexpected truncated_matches: %d", rep.Summary.TruncatedMatches)
+	}
+	if len(rep.Files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(rep.Files))
+	}
+	if rep.Files[0].Path != "a.cfb" || rep.Files[1].Path != "b.cfb" {
+		t.Fatalf("unexpected replay selection order: %+v", rep.Files)
+	}
+	if rep.Options.MaxMatchedFiles != 2 {
+		t.Fatalf("unexpected max_matched_files option: %d", rep.Options.MaxMatchedFiles)
+	}
+}
+
+func TestRunReplayMaxMatchedFilesValidation(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-max-matched-files", "-2"}, &out); err == nil {
+		t.Fatal("expected max-matched-files validation error")
+	}
+}
+
 func TestRunReplayFilterCounters(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "keep"), 0o755); err != nil {

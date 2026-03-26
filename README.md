@@ -112,6 +112,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-file-size-bytes 512 -m
 > replay summary includes `filtered_by_ext` / `filtered_by_path` / `filtered_by_size` counters.
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-matched-files 5000
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-partial 0 -trend-dir ./reports/history -max-partial-increase 0
 ```
 

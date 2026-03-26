@@ -25,6 +25,7 @@ type replayOptions struct {
 	ExcludeGlobs    []string `json:"exclude_globs,omitempty"`
 	MinFileSize     int64    `json:"min_file_size_bytes,omitempty"`
 	MaxFileSize     int64    `json:"max_file_size_bytes,omitempty"`
+	MaxMatchedFiles int      `json:"max_matched_files,omitempty"`
 	Mode            string   `json:"mode"`
 	ReportFiles     string   `json:"report_files"`
 	ReportSort      string   `json:"report_sort,omitempty"`
@@ -64,21 +65,22 @@ type replayFileResult struct {
 }
 
 type replaySummary struct {
-	ScannedFiles   int            `json:"scanned_files"`
-	MatchedFiles   int            `json:"matched_files"`
-	FilteredByExt  int            `json:"filtered_by_ext,omitempty"`
-	FilteredByPath int            `json:"filtered_by_path,omitempty"`
-	FilteredBySize int            `json:"filtered_by_size,omitempty"`
-	Processed      int            `json:"processed"`
-	Success        int            `json:"success"`
-	Failed         int            `json:"failed"`
-	Partial        int            `json:"partial"`
-	WarningsTotal  int            `json:"warnings_total"`
-	ReportedFiles  int            `json:"reported_files"`
-	OmittedFiles   int            `json:"omitted_files"`
-	PassRate       float64        `json:"pass_rate"`
-	DurationMS     int64          `json:"duration_ms"`
-	ErrorCodes     map[string]int `json:"error_codes,omitempty"`
+	ScannedFiles     int            `json:"scanned_files"`
+	MatchedFiles     int            `json:"matched_files"`
+	TruncatedMatches int            `json:"truncated_matches,omitempty"`
+	FilteredByExt    int            `json:"filtered_by_ext,omitempty"`
+	FilteredByPath   int            `json:"filtered_by_path,omitempty"`
+	FilteredBySize   int            `json:"filtered_by_size,omitempty"`
+	Processed        int            `json:"processed"`
+	Success          int            `json:"success"`
+	Failed           int            `json:"failed"`
+	Partial          int            `json:"partial"`
+	WarningsTotal    int            `json:"warnings_total"`
+	ReportedFiles    int            `json:"reported_files"`
+	OmittedFiles     int            `json:"omitted_files"`
+	PassRate         float64        `json:"pass_rate"`
+	DurationMS       int64          `json:"duration_ms"`
+	ErrorCodes       map[string]int `json:"error_codes,omitempty"`
 }
 
 type replayReport struct {
@@ -196,6 +198,7 @@ func run(args []string, out io.Writer) error {
 		excludeGlobCSV          = fset.String("exclude-glob", "", "comma-separated glob patterns on relative paths to exclude (POSIX slash style)")
 		minFileSize             = fset.Int64("min-file-size-bytes", -1, "minimum file size in bytes for corpus matching, negative disables")
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
+		maxMatchedFiles         = fset.Int("max-matched-files", -1, "maximum number of matched files to replay after sort, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|partial|issues|warnings|clean|none")
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|failed-first")
@@ -311,6 +314,9 @@ func run(args []string, out io.Writer) error {
 	if *reportOffset < 0 {
 		return errors.New("report-offset must be >= 0")
 	}
+	if *maxMatchedFiles < -1 {
+		return errors.New("max-matched-files must be >= -1")
+	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
 	if err != nil {
@@ -387,6 +393,11 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 	sort.Strings(matched)
+	truncatedMatches := 0
+	if *maxMatchedFiles >= 0 && len(matched) > *maxMatchedFiles {
+		truncatedMatches = len(matched) - *maxMatchedFiles
+		matched = matched[:*maxMatchedFiles]
+	}
 
 	opt := replayOptions{
 		Root:            absRoot,
@@ -395,6 +406,7 @@ func run(args []string, out io.Writer) error {
 		ExcludeGlobs:    append([]string(nil), excludeGlobs...),
 		MinFileSize:     *minFileSize,
 		MaxFileSize:     *maxFileSize,
+		MaxMatchedFiles: *maxMatchedFiles,
 		Mode:            strings.ToLower(*modeStr),
 		ReportFiles:     reportFilesPolicy,
 		ReportSort:      reportSortPolicy,
@@ -422,11 +434,12 @@ func run(args []string, out io.Writer) error {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Options:     opt,
 		Summary: replaySummary{
-			ScannedFiles:   scanned,
-			MatchedFiles:   len(matched),
-			FilteredByExt:  filteredByExt,
-			FilteredByPath: filteredByPath,
-			FilteredBySize: filteredBySize,
+			ScannedFiles:     scanned,
+			MatchedFiles:     len(matched),
+			TruncatedMatches: truncatedMatches,
+			FilteredByExt:    filteredByExt,
+			FilteredByPath:   filteredByPath,
+			FilteredBySize:   filteredBySize,
 		},
 		Files: make([]replayFileResult, 0, len(matched)),
 		Gate: replayGateResult{
