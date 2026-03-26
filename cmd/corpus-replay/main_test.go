@@ -511,6 +511,28 @@ func TestApplyReportFilePolicySortWarningsDesc(t *testing.T) {
 	}
 }
 
+func TestApplyReportFilePolicySortErrorCode(t *testing.T) {
+	rep := &replayReport{
+		Files: []replayFileResult{
+			{Path: "ok.cfb", ErrorCode: "", Success: true},
+			{Path: "z1.cfb", ErrorCode: "ZZZ", Success: false},
+			{Path: "a2.cfb", ErrorCode: "aaa", Success: false},
+			{Path: "a1.cfb", ErrorCode: "AAA", Success: false},
+		},
+	}
+	applyReportFilePolicy(rep, "all", "error-code", 0, -1)
+	if len(rep.Files) != 4 {
+		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
+	}
+	got := []string{rep.Files[0].Path, rep.Files[1].Path, rep.Files[2].Path, rep.Files[3].Path}
+	want := []string{"a1.cfb", "a2.cfb", "z1.cfb", "ok.cfb"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected error-code order: got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestRunReplayReportFilesInvalid(t *testing.T) {
 	var out bytes.Buffer
 	if err := run([]string{"-report-files", "bad"}, &out); err == nil {

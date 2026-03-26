@@ -110,6 +110,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort warnings-desc 
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -report-sort error-code -report-limit 100
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort failed-first -report-offset 100 -report-limit 100
 ```
 
