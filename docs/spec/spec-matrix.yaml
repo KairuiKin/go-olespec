@@ -151,6 +151,7 @@ items:
       - "integration/corpus_replay_report_files_warnings"
       - "integration/corpus_replay_path_filters"
       - "integration/corpus_replay_size_filters"
+      - "integration/corpus_replay_filter_counters"
       - "fuzz/olextract_write_artifacts"
 
   - id: PERF-001

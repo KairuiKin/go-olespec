@@ -403,6 +403,58 @@ func TestRunReplayFileSizeFilterValidation(t *testing.T) {
 	}
 }
 
+func TestRunReplayFilterCounters(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "keep"), 0o755); err != nil {
+		t.Fatalf("MkdirAll keep returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "drop"), 0o755); err != nil {
+		t.Fatalf("MkdirAll drop returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("txt"), 0o644); err != nil {
+		t.Fatalf("WriteFile a.txt returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "drop", "b.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile drop/b.cfb returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep", "small.cfb"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile keep/small.cfb returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep", "big.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile keep/big.cfb returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-include-glob", "keep/*.cfb",
+		"-min-file-size-bytes", "2",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.ScannedFiles != 4 {
+		t.Fatalf("unexpected scanned_files: %d", rep.Summary.ScannedFiles)
+	}
+	if rep.Summary.MatchedFiles != 1 || rep.Summary.Processed != 1 {
+		t.Fatalf("unexpected matched/processed summary: %+v", rep.Summary)
+	}
+	if rep.Summary.FilteredByExt != 1 {
+		t.Fatalf("unexpected filtered_by_ext: %d", rep.Summary.FilteredByExt)
+	}
+	if rep.Summary.FilteredByPath != 1 {
+		t.Fatalf("unexpected filtered_by_path: %d", rep.Summary.FilteredByPath)
+	}
+	if rep.Summary.FilteredBySize != 1 {
+		t.Fatalf("unexpected filtered_by_size: %d", rep.Summary.FilteredBySize)
+	}
+}
+
 func TestRunReplayBaselineDiffAndNewlyFailedGate(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.cfb")

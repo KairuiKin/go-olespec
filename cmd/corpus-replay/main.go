@@ -61,18 +61,21 @@ type replayFileResult struct {
 }
 
 type replaySummary struct {
-	ScannedFiles  int            `json:"scanned_files"`
-	MatchedFiles  int            `json:"matched_files"`
-	Processed     int            `json:"processed"`
-	Success       int            `json:"success"`
-	Failed        int            `json:"failed"`
-	Partial       int            `json:"partial"`
-	WarningsTotal int            `json:"warnings_total"`
-	ReportedFiles int            `json:"reported_files"`
-	OmittedFiles  int            `json:"omitted_files"`
-	PassRate      float64        `json:"pass_rate"`
-	DurationMS    int64          `json:"duration_ms"`
-	ErrorCodes    map[string]int `json:"error_codes,omitempty"`
+	ScannedFiles   int            `json:"scanned_files"`
+	MatchedFiles   int            `json:"matched_files"`
+	FilteredByExt  int            `json:"filtered_by_ext,omitempty"`
+	FilteredByPath int            `json:"filtered_by_path,omitempty"`
+	FilteredBySize int            `json:"filtered_by_size,omitempty"`
+	Processed      int            `json:"processed"`
+	Success        int            `json:"success"`
+	Failed         int            `json:"failed"`
+	Partial        int            `json:"partial"`
+	WarningsTotal  int            `json:"warnings_total"`
+	ReportedFiles  int            `json:"reported_files"`
+	OmittedFiles   int            `json:"omitted_files"`
+	PassRate       float64        `json:"pass_rate"`
+	DurationMS     int64          `json:"duration_ms"`
+	ErrorCodes     map[string]int `json:"error_codes,omitempty"`
 }
 
 type replayReport struct {
@@ -322,6 +325,9 @@ func run(args []string, out io.Writer) error {
 
 	start := time.Now()
 	scanned := 0
+	filteredByExt := 0
+	filteredByPath := 0
+	filteredBySize := 0
 	matched := make([]string, 0, 128)
 	err = filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -346,9 +352,19 @@ func run(args []string, out io.Writer) error {
 			}
 			size = info.Size()
 		}
-		if matchesExt(path, extensions) && matchesPathFilters(rel, includeGlobs, excludeGlobs) && matchesFileSize(size, *minFileSize, *maxFileSize) {
-			matched = append(matched, path)
+		if !matchesExt(path, extensions) {
+			filteredByExt++
+			return nil
 		}
+		if !matchesPathFilters(rel, includeGlobs, excludeGlobs) {
+			filteredByPath++
+			return nil
+		}
+		if !matchesFileSize(size, *minFileSize, *maxFileSize) {
+			filteredBySize++
+			return nil
+		}
+		matched = append(matched, path)
 		return nil
 	})
 	if err != nil {
@@ -387,8 +403,11 @@ func run(args []string, out io.Writer) error {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Options:     opt,
 		Summary: replaySummary{
-			ScannedFiles: scanned,
-			MatchedFiles: len(matched),
+			ScannedFiles:   scanned,
+			MatchedFiles:   len(matched),
+			FilteredByExt:  filteredByExt,
+			FilteredByPath: filteredByPath,
+			FilteredBySize: filteredBySize,
 		},
 		Files: make([]replayFileResult, 0, len(matched)),
 		Gate: replayGateResult{
