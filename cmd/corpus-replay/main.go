@@ -23,6 +23,8 @@ type replayOptions struct {
 	Extensions      []string `json:"extensions"`
 	IncludeGlobs    []string `json:"include_globs,omitempty"`
 	ExcludeGlobs    []string `json:"exclude_globs,omitempty"`
+	MinFileSize     int64    `json:"min_file_size_bytes,omitempty"`
+	MaxFileSize     int64    `json:"max_file_size_bytes,omitempty"`
 	Mode            string   `json:"mode"`
 	ReportFiles     string   `json:"report_files"`
 	RunID           string   `json:"run_id,omitempty"`
@@ -183,6 +185,8 @@ func run(args []string, out io.Writer) error {
 		extCSV                  = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
 		includeGlobCSV          = fset.String("include-glob", "", "comma-separated glob patterns on relative paths to include (POSIX slash style)")
 		excludeGlobCSV          = fset.String("exclude-glob", "", "comma-separated glob patterns on relative paths to exclude (POSIX slash style)")
+		minFileSize             = fset.Int64("min-file-size-bytes", -1, "minimum file size in bytes for corpus matching, negative disables")
+		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
@@ -278,6 +282,9 @@ func run(args []string, out io.Writer) error {
 	if *maxPassRateDrop > 1 {
 		return errors.New("max-pass-rate-drop must be <= 1")
 	}
+	if *minFileSize >= 0 && *maxFileSize >= 0 && *minFileSize > *maxFileSize {
+		return errors.New("min-file-size-bytes cannot be greater than max-file-size-bytes")
+	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
 	if err != nil {
@@ -320,7 +327,15 @@ func run(args []string, out io.Writer) error {
 		if r, relErr := filepath.Rel(absRoot, path); relErr == nil {
 			rel = filepath.ToSlash(r)
 		}
-		if matchesExt(path, extensions) && matchesPathFilters(rel, includeGlobs, excludeGlobs) {
+		size := int64(-1)
+		if *minFileSize >= 0 || *maxFileSize >= 0 {
+			info, infoErr := d.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			size = info.Size()
+		}
+		if matchesExt(path, extensions) && matchesPathFilters(rel, includeGlobs, excludeGlobs) && matchesFileSize(size, *minFileSize, *maxFileSize) {
 			matched = append(matched, path)
 		}
 		return nil
@@ -335,6 +350,8 @@ func run(args []string, out io.Writer) error {
 		Extensions:      append([]string(nil), extensions...),
 		IncludeGlobs:    append([]string(nil), includeGlobs...),
 		ExcludeGlobs:    append([]string(nil), excludeGlobs...),
+		MinFileSize:     *minFileSize,
+		MaxFileSize:     *maxFileSize,
 		Mode:            strings.ToLower(*modeStr),
 		ReportFiles:     reportFilesPolicy,
 		RunID:           strings.TrimSpace(*runID),
@@ -1448,4 +1465,20 @@ func matchesExt(path string, exts []string) bool {
 		}
 	}
 	return false
+}
+
+func matchesFileSize(size, min, max int64) bool {
+	if min < 0 && max < 0 {
+		return true
+	}
+	if size < 0 {
+		return false
+	}
+	if min >= 0 && size < min {
+		return false
+	}
+	if max >= 0 && size > max {
+		return false
+	}
+	return true
 }

@@ -340,6 +340,69 @@ func TestRunReplayGlobPatternValidation(t *testing.T) {
 	}
 }
 
+func TestRunReplayMinFileSizeFilter(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "small.cfb"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile small returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile big returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-min-file-size-bytes", "2",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 1 {
+		t.Fatalf("expected processed=1, got %d", rep.Summary.Processed)
+	}
+	if len(rep.Files) != 1 || rep.Files[0].Path != "big.cfb" {
+		t.Fatalf("unexpected files: %+v", rep.Files)
+	}
+}
+
+func TestRunReplayMaxFileSizeFilter(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "small.cfb"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile small returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile big returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-file-size-bytes", "10",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 1 {
+		t.Fatalf("expected processed=1, got %d", rep.Summary.Processed)
+	}
+	if len(rep.Files) != 1 || rep.Files[0].Path != "small.cfb" {
+		t.Fatalf("unexpected files: %+v", rep.Files)
+	}
+}
+
+func TestRunReplayFileSizeFilterValidation(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-min-file-size-bytes", "10", "-max-file-size-bytes", "1"}, &out); err == nil {
+		t.Fatal("expected min/max file-size validation error")
+	}
+}
+
 func TestRunReplayBaselineDiffAndNewlyFailedGate(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.cfb")

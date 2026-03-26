@@ -70,6 +70,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -include-glob "team-a/*.cfb
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-file-size-bytes 512 -max-file-size-bytes 16777216
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-partial 0 -trend-dir ./reports/history -max-partial-increase 0
 ```
 
