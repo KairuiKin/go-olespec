@@ -213,10 +213,72 @@ func TestRunReplayReportFilesWarnings(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-report-limit", "1"}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one file entry with report-limit=1, got %d", len(rep.Files))
+	}
+	if rep.Summary.Processed != 2 {
+		t.Fatalf("unexpected processed: %d", rep.Summary.Processed)
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+	if rep.Options.ReportLimit != 1 {
+		t.Fatalf("unexpected report limit option: %d", rep.Options.ReportLimit)
+	}
+}
+
+func TestRunReplayReportLimitWithFailedPolicy(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-files", "failed",
+		"-report-limit", "0",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 0 {
+		t.Fatalf("expected no file entries, got %d", len(rep.Files))
+	}
+	if rep.Summary.ReportedFiles != 0 || rep.Summary.OmittedFiles != 2 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
 func TestRunReplayReportFilesInvalid(t *testing.T) {
 	var out bytes.Buffer
 	if err := run([]string{"-report-files", "bad"}, &out); err == nil {
 		t.Fatal("expected report-files validation error")
+	}
+	if err := run([]string{"-report-limit", "-2"}, &out); err == nil {
+		t.Fatal("expected report-limit validation error")
 	}
 }
 

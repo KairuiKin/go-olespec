@@ -27,6 +27,7 @@ type replayOptions struct {
 	MaxFileSize     int64    `json:"max_file_size_bytes,omitempty"`
 	Mode            string   `json:"mode"`
 	ReportFiles     string   `json:"report_files"`
+	ReportLimit     int      `json:"report_limit,omitempty"`
 	RunID           string   `json:"run_id,omitempty"`
 	BaselineReport  string   `json:"baseline_report,omitempty"`
 	BaselineLatest  bool     `json:"baseline_latest,omitempty"`
@@ -195,6 +196,7 @@ func run(args []string, out io.Writer) error {
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
+		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
@@ -299,6 +301,9 @@ func run(args []string, out io.Writer) error {
 	if *minFileSize >= 0 && *maxFileSize >= 0 && *minFileSize > *maxFileSize {
 		return errors.New("min-file-size-bytes cannot be greater than max-file-size-bytes")
 	}
+	if *reportLimit < -1 {
+		return errors.New("report-limit must be >= -1")
+	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
 	if err != nil {
@@ -381,6 +386,7 @@ func run(args []string, out io.Writer) error {
 		MaxFileSize:     *maxFileSize,
 		Mode:            strings.ToLower(*modeStr),
 		ReportFiles:     reportFilesPolicy,
+		ReportLimit:     *reportLimit,
 		RunID:           strings.TrimSpace(*runID),
 		BaselineReport:  baselinePathTrim,
 		BaselineLatest:  *baselineLatest,
@@ -628,7 +634,7 @@ func run(args []string, out io.Writer) error {
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
 	)
-	applyReportFilePolicy(&report, reportFilesPolicy)
+	applyReportFilePolicy(&report, reportFilesPolicy, *reportLimit)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -1172,7 +1178,7 @@ func matchesPathFilters(rel string, include, exclude []string) bool {
 	return true
 }
 
-func applyReportFilePolicy(report *replayReport, policy string) {
+func applyReportFilePolicy(report *replayReport, policy string, limit int) {
 	if report == nil {
 		return
 	}
@@ -1208,6 +1214,9 @@ func applyReportFilePolicy(report *replayReport, policy string) {
 		report.Files = nil
 	default:
 		// unreachable if parsed through parseReportFilesPolicy
+	}
+	if limit >= 0 && len(report.Files) > limit {
+		report.Files = report.Files[:limit]
 	}
 	report.Summary.ReportedFiles = len(report.Files)
 	report.Summary.OmittedFiles = total - len(report.Files)
