@@ -155,6 +155,8 @@ type replayTrendDelta struct {
 type replayGateResult struct {
 	Enabled                 bool     `json:"enabled"`
 	Passed                  bool     `json:"passed"`
+	MinMatchedFiles         *int     `json:"min_matched_files,omitempty"`
+	MaxTruncatedMatches     *int     `json:"max_truncated_matches,omitempty"`
 	MinProcessed            *int     `json:"min_processed,omitempty"`
 	MaxProcessed            *int     `json:"max_processed,omitempty"`
 	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
@@ -221,6 +223,8 @@ func run(args []string, out io.Writer) error {
 		maxArtifacts            = fset.Int("max-artifacts", 4096, "max artifacts per file")
 		maxTotalBytes           = fset.Int64("max-total-bytes", 64<<20, "max total extracted bytes per file")
 		maxArtifactSize         = fset.Int64("max-artifact-size", 32<<20, "max single artifact size in bytes")
+		minMatchedFiles         = fset.Int("min-matched-files", -1, "gate: minimum required matched files before replay cap, negative disables")
+		maxTruncatedMatches     = fset.Int("max-truncated-matches", -1, "gate: maximum allowed truncated matches due to replay cap, negative disables")
 		minProcessed            = fset.Int("min-processed", -1, "gate: minimum required processed files, negative disables")
 		maxProcessed            = fset.Int("max-processed", -1, "gate: maximum allowed processed files, negative disables")
 		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
@@ -316,6 +320,12 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxMatchedFiles < -1 {
 		return errors.New("max-matched-files must be >= -1")
+	}
+	if *minMatchedFiles < -1 {
+		return errors.New("min-matched-files must be >= -1")
+	}
+	if *maxTruncatedMatches < -1 {
+		return errors.New("max-truncated-matches must be >= -1")
 	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
@@ -553,6 +563,16 @@ func run(args []string, out io.Writer) error {
 		v := *minPassRate
 		minPassRatePtr = &v
 	}
+	var minMatchedFilesPtr *int
+	if *minMatchedFiles >= 0 {
+		v := *minMatchedFiles
+		minMatchedFilesPtr = &v
+	}
+	var maxTruncatedMatchesPtr *int
+	if *maxTruncatedMatches >= 0 {
+		v := *maxTruncatedMatches
+		maxTruncatedMatchesPtr = &v
+	}
 	var minProcessedPtr *int
 	if *minProcessed >= 0 {
 		v := *minProcessed
@@ -640,6 +660,8 @@ func run(args []string, out io.Writer) error {
 	}
 	gateErr := evaluateGates(
 		&report,
+		minMatchedFilesPtr,
+		maxTruncatedMatchesPtr,
 		minProcessedPtr,
 		maxProcessedPtr,
 		minPassRatePtr,
@@ -913,6 +935,8 @@ func fileState(v replayFileResult) string {
 
 func evaluateGates(
 	report *replayReport,
+	minMatchedFiles *int,
+	maxTruncatedMatches *int,
 	minProcessed *int,
 	maxProcessed *int,
 	minPassRate *float64,
@@ -938,8 +962,10 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minMatchedFiles != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
+		MinMatchedFiles:         minMatchedFiles,
+		MaxTruncatedMatches:     maxTruncatedMatches,
 		MinProcessed:            minProcessed,
 		MaxProcessed:            maxProcessed,
 		MinPassRate:             minPassRate,
@@ -963,6 +989,15 @@ func evaluateGates(
 	}
 	if !report.Gate.Enabled {
 		return nil
+	}
+	matchedTotal := report.Summary.MatchedFiles + report.Summary.TruncatedMatches
+	if minMatchedFiles != nil && matchedTotal < *minMatchedFiles {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("matched_files_total %d < min_matched_files %d", matchedTotal, *minMatchedFiles))
+	}
+	if maxTruncatedMatches != nil && report.Summary.TruncatedMatches > *maxTruncatedMatches {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("truncated_matches %d > max_truncated_matches %d", report.Summary.TruncatedMatches, *maxTruncatedMatches))
 	}
 	if minProcessed != nil && report.Summary.Processed < *minProcessed {
 		report.Gate.Failures = append(report.Gate.Failures,
