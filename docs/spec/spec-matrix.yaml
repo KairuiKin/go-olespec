@@ -154,6 +154,7 @@ items:
       - "integration/corpus_replay_report_sort"
       - "integration/corpus_replay_report_sort_size_desc"
       - "integration/corpus_replay_report_sort_artifacts_desc"
+      - "integration/corpus_replay_report_sort_artifacts_failed_desc"
       - "integration/corpus_replay_report_sort_warnings_desc"
       - "integration/corpus_replay_report_sort_error_code"
       - "integration/corpus_replay_report_limit"

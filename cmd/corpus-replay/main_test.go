@@ -490,6 +490,27 @@ func TestApplyReportFilePolicySortArtifactsDesc(t *testing.T) {
 	}
 }
 
+func TestApplyReportFilePolicySortArtifactsFailedDesc(t *testing.T) {
+	rep := &replayReport{
+		Files: []replayFileResult{
+			{Path: "a.cfb", ArtifactsFail: 2, Success: true},
+			{Path: "c.cfb", ArtifactsFail: 1, Success: true},
+			{Path: "b.cfb", ArtifactsFail: 2, Success: true},
+		},
+	}
+	applyReportFilePolicy(rep, "all", "artifacts-failed-desc", 0, -1)
+	if len(rep.Files) != 3 {
+		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
+	}
+	got := []string{rep.Files[0].Path, rep.Files[1].Path, rep.Files[2].Path}
+	want := []string{"a.cfb", "b.cfb", "c.cfb"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected artifacts-failed-desc order: got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestApplyReportFilePolicySortWarningsDesc(t *testing.T) {
 	rep := &replayReport{
 		Files: []replayFileResult{

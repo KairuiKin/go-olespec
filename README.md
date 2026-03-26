@@ -106,6 +106,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort artifacts-desc
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort artifacts-failed-desc -report-limit 100
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort warnings-desc -report-limit 100
 ```
 
