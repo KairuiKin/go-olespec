@@ -272,6 +272,45 @@ func TestRunReplayReportLimitWithFailedPolicy(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportOffsetAndLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile b returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "c.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile c returned error: %v", err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-sort", "path",
+		"-report-offset", "1",
+		"-report-limit", "1",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 3 {
+		t.Fatalf("unexpected processed: %d", rep.Summary.Processed)
+	}
+	if len(rep.Files) != 1 || rep.Files[0].Path != "b.cfb" {
+		t.Fatalf("unexpected paged files: %+v", rep.Files)
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 2 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+	if rep.Options.ReportOffset != 1 || rep.Options.ReportLimit != 1 {
+		t.Fatalf("unexpected pagination options: %+v", rep.Options)
+	}
+}
+
 func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 	rep := &replayReport{
 		Files: []replayFileResult{
@@ -280,7 +319,7 @@ func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 			{Path: "b.cfb", DurationMS: 20, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "duration-desc", 2)
+	applyReportFilePolicy(rep, "all", "duration-desc", 0, 2)
 	if len(rep.Files) != 2 {
 		t.Fatalf("expected 2 file entries, got %d", len(rep.Files))
 	}
@@ -301,7 +340,7 @@ func TestApplyReportFilePolicySortFailedFirst(t *testing.T) {
 			{Path: "bad2.cfb", Success: false, Partial: false, Warnings: 0, DurationMS: 8},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "failed-first", -1)
+	applyReportFilePolicy(rep, "all", "failed-first", 0, -1)
 	if len(rep.Files) != 4 {
 		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
 	}
@@ -322,7 +361,7 @@ func TestApplyReportFilePolicySortSizeDesc(t *testing.T) {
 			{Path: "b.cfb", Size: 20, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "size-desc", -1)
+	applyReportFilePolicy(rep, "all", "size-desc", 0, -1)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -342,6 +381,9 @@ func TestRunReplayReportFilesInvalid(t *testing.T) {
 	}
 	if err := run([]string{"-report-sort", "bad"}, &out); err == nil {
 		t.Fatal("expected report-sort validation error")
+	}
+	if err := run([]string{"-report-offset", "-1"}, &out); err == nil {
+		t.Fatal("expected report-offset validation error")
 	}
 	if err := run([]string{"-report-limit", "-2"}, &out); err == nil {
 		t.Fatal("expected report-limit validation error")

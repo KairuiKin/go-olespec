@@ -28,6 +28,7 @@ type replayOptions struct {
 	Mode            string   `json:"mode"`
 	ReportFiles     string   `json:"report_files"`
 	ReportSort      string   `json:"report_sort,omitempty"`
+	ReportOffset    int      `json:"report_offset,omitempty"`
 	ReportLimit     int      `json:"report_limit,omitempty"`
 	RunID           string   `json:"run_id,omitempty"`
 	BaselineReport  string   `json:"baseline_report,omitempty"`
@@ -198,6 +199,7 @@ func run(args []string, out io.Writer) error {
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|failed-first")
+		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
@@ -306,6 +308,9 @@ func run(args []string, out io.Writer) error {
 	if *reportLimit < -1 {
 		return errors.New("report-limit must be >= -1")
 	}
+	if *reportOffset < 0 {
+		return errors.New("report-offset must be >= 0")
+	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
 	if err != nil {
@@ -393,6 +398,7 @@ func run(args []string, out io.Writer) error {
 		Mode:            strings.ToLower(*modeStr),
 		ReportFiles:     reportFilesPolicy,
 		ReportSort:      reportSortPolicy,
+		ReportOffset:    *reportOffset,
 		ReportLimit:     *reportLimit,
 		RunID:           strings.TrimSpace(*runID),
 		BaselineReport:  baselinePathTrim,
@@ -641,7 +647,7 @@ func run(args []string, out io.Writer) error {
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
 	)
-	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportLimit)
+	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -1200,7 +1206,7 @@ func matchesPathFilters(rel string, include, exclude []string) bool {
 	return true
 }
 
-func applyReportFilePolicy(report *replayReport, policy, sortBy string, limit int) {
+func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, limit int) {
 	if report == nil {
 		return
 	}
@@ -1279,6 +1285,13 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, limit in
 		})
 	default:
 		// unreachable if parsed through parseReportSortPolicy
+	}
+	if offset > 0 {
+		if offset >= len(report.Files) {
+			report.Files = nil
+		} else {
+			report.Files = report.Files[offset:]
+		}
 	}
 	if limit >= 0 && len(report.Files) > limit {
 		report.Files = report.Files[:limit]

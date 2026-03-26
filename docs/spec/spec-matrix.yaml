@@ -152,6 +152,7 @@ items:
       - "integration/corpus_replay_report_sort"
       - "integration/corpus_replay_report_sort_size_desc"
       - "integration/corpus_replay_report_limit"
+      - "integration/corpus_replay_report_pagination"
       - "integration/corpus_replay_path_filters"
       - "integration/corpus_replay_size_filters"
       - "integration/corpus_replay_filter_counters"
