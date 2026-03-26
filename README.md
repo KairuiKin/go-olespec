@@ -74,6 +74,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files issues -repor
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files all -report-sort duration-desc -report-limit 50
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -include-glob "team-a/*.cfb,team-b/*.cfb" -exclude-glob "team-a/archive/*.cfb"
 ```
 

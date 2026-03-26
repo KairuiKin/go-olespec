@@ -272,10 +272,33 @@ func TestRunReplayReportLimitWithFailedPolicy(t *testing.T) {
 	}
 }
 
+func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
+	rep := &replayReport{
+		Files: []replayFileResult{
+			{Path: "a.cfb", DurationMS: 10, Success: true},
+			{Path: "c.cfb", DurationMS: 30, Success: true},
+			{Path: "b.cfb", DurationMS: 20, Success: true},
+		},
+	}
+	applyReportFilePolicy(rep, "all", "duration-desc", 2)
+	if len(rep.Files) != 2 {
+		t.Fatalf("expected 2 file entries, got %d", len(rep.Files))
+	}
+	if rep.Files[0].Path != "c.cfb" || rep.Files[1].Path != "b.cfb" {
+		t.Fatalf("unexpected duration-desc order: %+v", rep.Files)
+	}
+	if rep.Summary.ReportedFiles != 2 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
 func TestRunReplayReportFilesInvalid(t *testing.T) {
 	var out bytes.Buffer
 	if err := run([]string{"-report-files", "bad"}, &out); err == nil {
 		t.Fatal("expected report-files validation error")
+	}
+	if err := run([]string{"-report-sort", "bad"}, &out); err == nil {
+		t.Fatal("expected report-sort validation error")
 	}
 	if err := run([]string{"-report-limit", "-2"}, &out); err == nil {
 		t.Fatal("expected report-limit validation error")
