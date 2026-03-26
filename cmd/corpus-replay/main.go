@@ -144,6 +144,8 @@ type replayTrendDelta struct {
 type replayGateResult struct {
 	Enabled                 bool     `json:"enabled"`
 	Passed                  bool     `json:"passed"`
+	MinProcessed            *int     `json:"min_processed,omitempty"`
+	MaxProcessed            *int     `json:"max_processed,omitempty"`
 	MinPassRate             *float64 `json:"min_pass_rate,omitempty"`
 	MaxFailed               *int     `json:"max_failed,omitempty"`
 	MaxPartial              *int     `json:"max_partial,omitempty"`
@@ -200,6 +202,8 @@ func run(args []string, out io.Writer) error {
 		maxArtifacts            = fset.Int("max-artifacts", 4096, "max artifacts per file")
 		maxTotalBytes           = fset.Int64("max-total-bytes", 64<<20, "max total extracted bytes per file")
 		maxArtifactSize         = fset.Int64("max-artifact-size", 32<<20, "max single artifact size in bytes")
+		minProcessed            = fset.Int("min-processed", -1, "gate: minimum required processed files, negative disables")
+		maxProcessed            = fset.Int("max-processed", -1, "gate: maximum allowed processed files, negative disables")
 		minPassRate             = fset.Float64("min-pass-rate", -1, "gate: minimum acceptable pass rate in [0,1], negative disables")
 		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
 		maxPartial              = fset.Int("max-partial", -1, "gate: maximum allowed partial files, negative disables")
@@ -470,6 +474,16 @@ func run(args []string, out io.Writer) error {
 		v := *minPassRate
 		minPassRatePtr = &v
 	}
+	var minProcessedPtr *int
+	if *minProcessed >= 0 {
+		v := *minProcessed
+		minProcessedPtr = &v
+	}
+	var maxProcessedPtr *int
+	if *maxProcessed >= 0 {
+		v := *maxProcessed
+		maxProcessedPtr = &v
+	}
 	var maxFailedPtr *int
 	if *maxFailed >= 0 {
 		v := *maxFailed
@@ -537,6 +551,8 @@ func run(args []string, out io.Writer) error {
 	}
 	gateErr := evaluateGates(
 		&report,
+		minProcessedPtr,
+		maxProcessedPtr,
 		minPassRatePtr,
 		maxFailedPtr,
 		maxPartialPtr,
@@ -806,6 +822,8 @@ func fileState(v replayFileResult) string {
 
 func evaluateGates(
 	report *replayReport,
+	minProcessed *int,
+	maxProcessed *int,
 	minPassRate *float64,
 	maxFailed *int,
 	maxPartial *int,
@@ -827,8 +845,10 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
+		MinProcessed:            minProcessed,
+		MaxProcessed:            maxProcessed,
 		MinPassRate:             minPassRate,
 		MaxFailed:               maxFailed,
 		MaxPartial:              maxPartial,
@@ -848,6 +868,14 @@ func evaluateGates(
 	}
 	if !report.Gate.Enabled {
 		return nil
+	}
+	if minProcessed != nil && report.Summary.Processed < *minProcessed {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("processed %d < min_processed %d", report.Summary.Processed, *minProcessed))
+	}
+	if maxProcessed != nil && report.Summary.Processed > *maxProcessed {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("processed %d > max_processed %d", report.Summary.Processed, *maxProcessed))
 	}
 	if minPassRate != nil && report.Summary.PassRate < *minPassRate {
 		report.Gate.Failures = append(report.Gate.Failures,

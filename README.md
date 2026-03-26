@@ -22,6 +22,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-processed 100 -max-processed 200
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -baseline ./baseline.json -max-new-error-codes 0 -max-error-code-regressions 0 -deny-error-codes BAD_HEADER,DIR_CORRUPT
 ```
 

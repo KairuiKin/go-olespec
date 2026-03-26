@@ -448,6 +448,53 @@ func TestRunReplayMaxFailedGate(t *testing.T) {
 	}
 }
 
+func TestRunReplayMinProcessedGate(t *testing.T) {
+	root := t.TempDir()
+	var out bytes.Buffer
+	err := run([]string{"-root", root, "-ext", ".cfb", "-min-processed", "1"}, &out)
+	if err == nil {
+		t.Fatal("expected min-processed gate error")
+	}
+	if !strings.Contains(err.Error(), "min_processed") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.Processed != 0 {
+		t.Fatalf("expected processed=0, got %d", rep.Summary.Processed)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayMaxProcessedGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	var out bytes.Buffer
+	err := run([]string{"-root", root, "-ext", ".cfb", "-max-processed", "0"}, &out)
+	if err == nil {
+		t.Fatal("expected max-processed gate error")
+	}
+	if !strings.Contains(err.Error(), "max_processed") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.Processed != 1 {
+		t.Fatalf("expected processed=1, got %d", rep.Summary.Processed)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
 func TestRunReplayMaxPartialGate(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
