@@ -197,7 +197,7 @@ func run(args []string, out io.Writer) error {
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
-		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|failed-first")
+		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|failed-first")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
@@ -1148,10 +1148,12 @@ func parseReportSortPolicy(v string) (string, error) {
 		return "path", nil
 	case "duration-desc":
 		return "duration-desc", nil
+	case "size-desc":
+		return "size-desc", nil
 	case "failed-first":
 		return "failed-first", nil
 	default:
-		return "", fmt.Errorf("invalid report-sort %q, expected path|duration-desc|failed-first", v)
+		return "", fmt.Errorf("invalid report-sort %q, expected path|duration-desc|size-desc|failed-first", v)
 	}
 }
 
@@ -1249,6 +1251,13 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, limit in
 				return report.Files[i].Path < report.Files[j].Path
 			}
 			return report.Files[i].DurationMS > report.Files[j].DurationMS
+		})
+	case "size-desc":
+		sort.SliceStable(report.Files, func(i, j int) bool {
+			if report.Files[i].Size == report.Files[j].Size {
+				return report.Files[i].Path < report.Files[j].Path
+			}
+			return report.Files[i].Size > report.Files[j].Size
 		})
 	case "failed-first":
 		sort.SliceStable(report.Files, func(i, j int) bool {
