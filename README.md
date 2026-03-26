@@ -147,6 +147,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-partial 0 -trend-dir .
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-warnings 0 -trend-dir ./reports/history -max-warning-increase 0
 ```
 
+```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-warning-files 0
+```
+
 ## Implemented so far (`pkg/olecfb`)
 
 - CFB header parsing and validation (v3/v4)

@@ -1231,6 +1231,33 @@ func TestRunReplayMaxWarningsGate(t *testing.T) {
 	}
 }
 
+func TestRunReplayMaxWarningFilesGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	var out bytes.Buffer
+	err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-max-artifact-size", "1",
+		"-max-warning-files", "0",
+	}, &out)
+	if err == nil {
+		t.Fatal("expected max-warning-files gate error")
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.WarningFiles == 0 {
+		t.Fatalf("expected warning files > 0, got %d", rep.Summary.WarningFiles)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
 func TestRunReplayMaxNewlyFailedRequiresBaseline(t *testing.T) {
 	var out bytes.Buffer
 	err := run([]string{"-max-newly-failed", "0"}, &out)

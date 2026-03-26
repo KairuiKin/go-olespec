@@ -75,6 +75,7 @@ type replaySummary struct {
 	Success          int            `json:"success"`
 	Failed           int            `json:"failed"`
 	Partial          int            `json:"partial"`
+	WarningFiles     int            `json:"warning_files"`
 	WarningsTotal    int            `json:"warnings_total"`
 	ReportedFiles    int            `json:"reported_files"`
 	OmittedFiles     int            `json:"omitted_files"`
@@ -165,6 +166,7 @@ type replayGateResult struct {
 	MaxFailed               *int     `json:"max_failed,omitempty"`
 	MaxPartial              *int     `json:"max_partial,omitempty"`
 	MaxWarnings             *int     `json:"max_warnings,omitempty"`
+	MaxWarningFiles         *int     `json:"max_warning_files,omitempty"`
 	MaxNewlyFailed          *int     `json:"max_newly_failed,omitempty"`
 	MaxNewFiles             *int     `json:"max_new_files,omitempty"`
 	MaxRemovedFiles         *int     `json:"max_removed_files,omitempty"`
@@ -235,6 +237,7 @@ func run(args []string, out io.Writer) error {
 		maxFailed               = fset.Int("max-failed", -1, "gate: maximum allowed failed files, negative disables")
 		maxPartial              = fset.Int("max-partial", -1, "gate: maximum allowed partial files, negative disables")
 		maxWarnings             = fset.Int("max-warnings", -1, "gate: maximum allowed warning count, negative disables")
+		maxWarningFiles         = fset.Int("max-warning-files", -1, "gate: maximum allowed files with warnings, negative disables")
 		maxNewlyFailed          = fset.Int("max-newly-failed", -1, "gate: maximum allowed newly failed files vs baseline, negative disables")
 		maxNewFiles             = fset.Int("max-new-files", -1, "gate: maximum allowed new files vs baseline, negative disables")
 		maxRemovedFiles         = fset.Int("max-removed-files", -1, "gate: maximum allowed removed files vs baseline, negative disables")
@@ -523,6 +526,9 @@ func run(args []string, out io.Writer) error {
 			item.ArtifactsOK = rep.Stats.ArtifactsOK
 			item.ArtifactsFail = rep.Stats.ArtifactsFailed
 			item.Warnings = len(rep.Warnings)
+			if item.Warnings > 0 {
+				report.Summary.WarningFiles++
+			}
 			report.Summary.WarningsTotal += item.Warnings
 			report.Summary.Success++
 			if rep.Partial {
@@ -618,6 +624,11 @@ func run(args []string, out io.Writer) error {
 		v := *maxWarnings
 		maxWarningsPtr = &v
 	}
+	var maxWarningFilesPtr *int
+	if *maxWarningFiles >= 0 {
+		v := *maxWarningFiles
+		maxWarningFilesPtr = &v
+	}
 	var maxNewlyFailedPtr *int
 	if *maxNewlyFailed >= 0 {
 		v := *maxNewlyFailed
@@ -690,6 +701,7 @@ func run(args []string, out io.Writer) error {
 		maxFailedPtr,
 		maxPartialPtr,
 		maxWarningsPtr,
+		maxWarningFilesPtr,
 		maxNewlyFailedPtr,
 		maxNewFilesPtr,
 		maxRemovedFilesPtr,
@@ -967,6 +979,7 @@ func evaluateGates(
 	maxFailed *int,
 	maxPartial *int,
 	maxWarnings *int,
+	maxWarningFiles *int,
 	maxNewlyFailed *int,
 	maxNewFiles *int,
 	maxRemovedFiles *int,
@@ -986,7 +999,7 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minScannedFiles != nil || maxScannedFiles != nil || minMatchedFiles != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minScannedFiles != nil || maxScannedFiles != nil || minMatchedFiles != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxWarningFiles != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
 		MinScannedFiles:         minScannedFiles,
 		MaxScannedFiles:         maxScannedFiles,
@@ -998,6 +1011,7 @@ func evaluateGates(
 		MaxFailed:               maxFailed,
 		MaxPartial:              maxPartial,
 		MaxWarnings:             maxWarnings,
+		MaxWarningFiles:         maxWarningFiles,
 		MaxNewlyFailed:          maxNewlyFailed,
 		MaxNewFiles:             maxNewFiles,
 		MaxRemovedFiles:         maxRemovedFiles,
@@ -1056,6 +1070,10 @@ func evaluateGates(
 	if maxWarnings != nil && report.Summary.WarningsTotal > *maxWarnings {
 		report.Gate.Failures = append(report.Gate.Failures,
 			fmt.Sprintf("warnings %d > max_warnings %d", report.Summary.WarningsTotal, *maxWarnings))
+	}
+	if maxWarningFiles != nil && report.Summary.WarningFiles > *maxWarningFiles {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("warning_files %d > max_warning_files %d", report.Summary.WarningFiles, *maxWarningFiles))
 	}
 	if maxNewlyFailed != nil {
 		if report.Baseline == nil {
