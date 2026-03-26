@@ -198,7 +198,7 @@ func run(args []string, out io.Writer) error {
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
-		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|failed-first")
+		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|failed-first")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
@@ -1156,10 +1156,12 @@ func parseReportSortPolicy(v string) (string, error) {
 		return "duration-desc", nil
 	case "size-desc":
 		return "size-desc", nil
+	case "artifacts-desc":
+		return "artifacts-desc", nil
 	case "failed-first":
 		return "failed-first", nil
 	default:
-		return "", fmt.Errorf("invalid report-sort %q, expected path|duration-desc|size-desc|failed-first", v)
+		return "", fmt.Errorf("invalid report-sort %q, expected path|duration-desc|size-desc|artifacts-desc|failed-first", v)
 	}
 }
 
@@ -1264,6 +1266,13 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 				return report.Files[i].Path < report.Files[j].Path
 			}
 			return report.Files[i].Size > report.Files[j].Size
+		})
+	case "artifacts-desc":
+		sort.SliceStable(report.Files, func(i, j int) bool {
+			if report.Files[i].ArtifactsTotal == report.Files[j].ArtifactsTotal {
+				return report.Files[i].Path < report.Files[j].Path
+			}
+			return report.Files[i].ArtifactsTotal > report.Files[j].ArtifactsTotal
 		})
 	case "failed-first":
 		sort.SliceStable(report.Files, func(i, j int) bool {

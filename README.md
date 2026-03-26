@@ -86,6 +86,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort size-desc -rep
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort artifacts-desc -report-limit 100
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort failed-first -report-offset 100 -report-limit 100
 ```
 
