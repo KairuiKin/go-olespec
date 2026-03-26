@@ -19,35 +19,37 @@ import (
 )
 
 type replayOptions struct {
-	Root            string   `json:"root"`
-	Extensions      []string `json:"extensions"`
-	IncludeGlobs    []string `json:"include_globs,omitempty"`
-	ExcludeGlobs    []string `json:"exclude_globs,omitempty"`
-	MinFileSize     int64    `json:"min_file_size_bytes,omitempty"`
-	MaxFileSize     int64    `json:"max_file_size_bytes,omitempty"`
-	MaxMatchedFiles int      `json:"max_matched_files,omitempty"`
-	Mode            string   `json:"mode"`
-	ReportFiles     string   `json:"report_files"`
-	ReportSort      string   `json:"report_sort,omitempty"`
-	ReportOffset    int      `json:"report_offset,omitempty"`
-	ReportLimit     int      `json:"report_limit,omitempty"`
-	RunID           string   `json:"run_id,omitempty"`
-	BaselineReport  string   `json:"baseline_report,omitempty"`
-	BaselineLatest  bool     `json:"baseline_latest,omitempty"`
-	TrendDir        string   `json:"trend_dir,omitempty"`
-	TrendLimit      int      `json:"trend_limit,omitempty"`
-	SaveTrend       bool     `json:"save_trend,omitempty"`
-	SaveTrendName   string   `json:"save_trend_name,omitempty"`
-	SaveTrendPrune  bool     `json:"save_trend_prune,omitempty"`
-	IncludeRaw      bool     `json:"include_raw"`
-	DetectImages    bool     `json:"detect_images"`
-	DetectOLEDS     bool     `json:"detect_oleds"`
-	UnwrapOle10     bool     `json:"unwrap_ole10native"`
-	Deduplicate     bool     `json:"deduplicate"`
-	MaxDepth        int      `json:"max_depth"`
-	MaxArtifacts    int      `json:"max_artifacts"`
-	MaxTotalBytes   int64    `json:"max_total_bytes"`
-	MaxArtifactSize int64    `json:"max_artifact_size"`
+	Root                    string   `json:"root"`
+	Extensions              []string `json:"extensions"`
+	IncludeGlobs            []string `json:"include_globs,omitempty"`
+	ExcludeGlobs            []string `json:"exclude_globs,omitempty"`
+	MinFileSize             int64    `json:"min_file_size_bytes,omitempty"`
+	MaxFileSize             int64    `json:"max_file_size_bytes,omitempty"`
+	MaxMatchedFiles         int      `json:"max_matched_files,omitempty"`
+	Mode                    string   `json:"mode"`
+	ReportFiles             string   `json:"report_files"`
+	ReportSort              string   `json:"report_sort,omitempty"`
+	ReportOffset            int      `json:"report_offset,omitempty"`
+	ReportLimit             int      `json:"report_limit,omitempty"`
+	ReportErrorCodes        []string `json:"report_error_codes,omitempty"`
+	ReportExcludeErrorCodes []string `json:"report_exclude_error_codes,omitempty"`
+	RunID                   string   `json:"run_id,omitempty"`
+	BaselineReport          string   `json:"baseline_report,omitempty"`
+	BaselineLatest          bool     `json:"baseline_latest,omitempty"`
+	TrendDir                string   `json:"trend_dir,omitempty"`
+	TrendLimit              int      `json:"trend_limit,omitempty"`
+	SaveTrend               bool     `json:"save_trend,omitempty"`
+	SaveTrendName           string   `json:"save_trend_name,omitempty"`
+	SaveTrendPrune          bool     `json:"save_trend_prune,omitempty"`
+	IncludeRaw              bool     `json:"include_raw"`
+	DetectImages            bool     `json:"detect_images"`
+	DetectOLEDS             bool     `json:"detect_oleds"`
+	UnwrapOle10             bool     `json:"unwrap_ole10native"`
+	Deduplicate             bool     `json:"deduplicate"`
+	MaxDepth                int      `json:"max_depth"`
+	MaxArtifacts            int      `json:"max_artifacts"`
+	MaxTotalBytes           int64    `json:"max_total_bytes"`
+	MaxArtifactSize         int64    `json:"max_artifact_size"`
 }
 
 type replayFileResult struct {
@@ -212,6 +214,8 @@ func run(args []string, out io.Writer) error {
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|artifacts-failed-desc|warnings-desc|error-code|failed-first")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
+		reportErrorCodes        = fset.String("report-error-codes", "", "comma-separated error codes to include in report file entries after report-files policy")
+		reportExcludeErrorCodes = fset.String("report-exclude-error-codes", "", "comma-separated error codes to exclude from report file entries after report-files policy")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
@@ -347,6 +351,8 @@ func run(args []string, out io.Writer) error {
 		return errors.New("max-truncated-matches must be >= -1")
 	}
 	denyCodes := parseCSVTokens(*denyErrorCodes)
+	reportIncludeCodes := normalizeCodes(parseCSVTokens(*reportErrorCodes))
+	reportExcludeCodes := normalizeCodes(parseCSVTokens(*reportExcludeErrorCodes))
 	reportFilesPolicy, err := parseReportFilesPolicy(*reportFiles)
 	if err != nil {
 		return err
@@ -430,35 +436,37 @@ func run(args []string, out io.Writer) error {
 	}
 
 	opt := replayOptions{
-		Root:            absRoot,
-		Extensions:      append([]string(nil), extensions...),
-		IncludeGlobs:    append([]string(nil), includeGlobs...),
-		ExcludeGlobs:    append([]string(nil), excludeGlobs...),
-		MinFileSize:     *minFileSize,
-		MaxFileSize:     *maxFileSize,
-		MaxMatchedFiles: *maxMatchedFiles,
-		Mode:            strings.ToLower(*modeStr),
-		ReportFiles:     reportFilesPolicy,
-		ReportSort:      reportSortPolicy,
-		ReportOffset:    *reportOffset,
-		ReportLimit:     *reportLimit,
-		RunID:           strings.TrimSpace(*runID),
-		BaselineReport:  baselinePathTrim,
-		BaselineLatest:  *baselineLatest,
-		TrendDir:        trendDirTrim,
-		TrendLimit:      *trendLimit,
-		SaveTrend:       *saveTrend,
-		SaveTrendName:   strings.TrimSpace(*saveTrendName),
-		SaveTrendPrune:  *saveTrendPrune,
-		IncludeRaw:      *includeRaw,
-		DetectImages:    *detectImages,
-		DetectOLEDS:     *detectOLEDS,
-		UnwrapOle10:     *unwrapOle10,
-		Deduplicate:     *dedup,
-		MaxDepth:        *maxDepth,
-		MaxArtifacts:    *maxArtifacts,
-		MaxTotalBytes:   *maxTotalBytes,
-		MaxArtifactSize: *maxArtifactSize,
+		Root:                    absRoot,
+		Extensions:              append([]string(nil), extensions...),
+		IncludeGlobs:            append([]string(nil), includeGlobs...),
+		ExcludeGlobs:            append([]string(nil), excludeGlobs...),
+		MinFileSize:             *minFileSize,
+		MaxFileSize:             *maxFileSize,
+		MaxMatchedFiles:         *maxMatchedFiles,
+		Mode:                    strings.ToLower(*modeStr),
+		ReportFiles:             reportFilesPolicy,
+		ReportSort:              reportSortPolicy,
+		ReportOffset:            *reportOffset,
+		ReportLimit:             *reportLimit,
+		ReportErrorCodes:        append([]string(nil), reportIncludeCodes...),
+		ReportExcludeErrorCodes: append([]string(nil), reportExcludeCodes...),
+		RunID:                   strings.TrimSpace(*runID),
+		BaselineReport:          baselinePathTrim,
+		BaselineLatest:          *baselineLatest,
+		TrendDir:                trendDirTrim,
+		TrendLimit:              *trendLimit,
+		SaveTrend:               *saveTrend,
+		SaveTrendName:           strings.TrimSpace(*saveTrendName),
+		SaveTrendPrune:          *saveTrendPrune,
+		IncludeRaw:              *includeRaw,
+		DetectImages:            *detectImages,
+		DetectOLEDS:             *detectOLEDS,
+		UnwrapOle10:             *unwrapOle10,
+		Deduplicate:             *dedup,
+		MaxDepth:                *maxDepth,
+		MaxArtifacts:            *maxArtifacts,
+		MaxTotalBytes:           *maxTotalBytes,
+		MaxArtifactSize:         *maxArtifactSize,
 	}
 	report := replayReport{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -730,7 +738,7 @@ func run(args []string, out io.Writer) error {
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
 	)
-	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit)
+	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit, reportIncludeCodes, reportExcludeCodes)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -1343,7 +1351,7 @@ func matchesPathFilters(rel string, include, exclude []string) bool {
 	return true
 }
 
-func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, limit int) {
+func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, limit int, includeCodes, excludeCodes []string) {
 	if report == nil {
 		return
 	}
@@ -1403,6 +1411,32 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 		report.Files = nil
 	default:
 		// unreachable if parsed through parseReportFilesPolicy
+	}
+	if len(includeCodes) > 0 || len(excludeCodes) > 0 {
+		includeSet := map[string]struct{}{}
+		excludeSet := map[string]struct{}{}
+		for _, code := range includeCodes {
+			includeSet[code] = struct{}{}
+		}
+		for _, code := range excludeCodes {
+			excludeSet[code] = struct{}{}
+		}
+		filtered := make([]replayFileResult, 0, len(report.Files))
+		for _, f := range report.Files {
+			code := normalizeReportErrorCode(f)
+			if len(includeSet) > 0 {
+				if _, ok := includeSet[code]; !ok {
+					continue
+				}
+			}
+			if len(excludeSet) > 0 {
+				if _, ok := excludeSet[code]; ok {
+					continue
+				}
+			}
+			filtered = append(filtered, f)
+		}
+		report.Files = filtered
 	}
 	switch sortBy {
 	case "", "path":
@@ -1495,6 +1529,14 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 	}
 	report.Summary.ReportedFiles = len(report.Files)
 	report.Summary.OmittedFiles = total - len(report.Files)
+}
+
+func normalizeReportErrorCode(file replayFileResult) string {
+	code := strings.ToUpper(strings.TrimSpace(file.ErrorCode))
+	if code == "" && !file.Success {
+		return "UNKNOWN"
+	}
+	return code
 }
 
 func normalizeCodes(codes []string) []string {

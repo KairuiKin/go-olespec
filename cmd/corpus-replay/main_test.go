@@ -77,6 +77,23 @@ func TestParseModeInvalid(t *testing.T) {
 	}
 }
 
+func probeFirstReplayErrorCode(t *testing.T, root string) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb"}, &out); err != nil {
+		t.Fatalf("probe run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal probe returned error: %v", err)
+	}
+	for k := range rep.Summary.ErrorCodes {
+		return k
+	}
+	t.Fatal("expected at least one error code")
+	return ""
+}
+
 func TestRunReplayReportFilesFailed(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
@@ -462,6 +479,115 @@ func TestRunReplayReportOffsetAndLimit(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportErrorCodesInclude(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	code := probeFirstReplayErrorCode(t, root)
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-files", "all",
+		"-report-error-codes", strings.ToLower(code),
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one included file entry, got %d", len(rep.Files))
+	}
+	if rep.Files[0].Path != "bad.cfb" {
+		t.Fatalf("expected bad.cfb entry, got %s", rep.Files[0].Path)
+	}
+	if rep.Summary.Processed != 2 {
+		t.Fatalf("unexpected processed: %d", rep.Summary.Processed)
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+	if len(rep.Options.ReportErrorCodes) != 1 || rep.Options.ReportErrorCodes[0] != code {
+		t.Fatalf("unexpected report error code options: %+v", rep.Options.ReportErrorCodes)
+	}
+}
+
+func TestRunReplayReportErrorCodesExclude(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile ok returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	code := probeFirstReplayErrorCode(t, root)
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-files", "all",
+		"-report-exclude-error-codes", code,
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 1 {
+		t.Fatalf("expected one non-excluded file entry, got %d", len(rep.Files))
+	}
+	if rep.Files[0].Path != "ok.cfb" {
+		t.Fatalf("expected ok.cfb entry, got %s", rep.Files[0].Path)
+	}
+	if rep.Summary.Processed != 2 {
+		t.Fatalf("unexpected processed: %d", rep.Summary.Processed)
+	}
+	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+	if len(rep.Options.ReportExcludeErrorCodes) != 1 || rep.Options.ReportExcludeErrorCodes[0] != code {
+		t.Fatalf("unexpected report exclude error code options: %+v", rep.Options.ReportExcludeErrorCodes)
+	}
+}
+
+func TestRunReplayReportErrorCodesExcludeWins(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+	code := probeFirstReplayErrorCode(t, root)
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-files", "failed",
+		"-report-error-codes", code,
+		"-report-exclude-error-codes", code,
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if len(rep.Files) != 0 {
+		t.Fatalf("expected exclude to win and remove all entries, got %d", len(rep.Files))
+	}
+	if rep.Summary.ReportedFiles != 0 || rep.Summary.OmittedFiles != 1 {
+		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+}
+
 func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 	rep := &replayReport{
 		Files: []replayFileResult{
@@ -470,7 +596,7 @@ func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 			{Path: "b.cfb", DurationMS: 20, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "duration-desc", 0, 2)
+	applyReportFilePolicy(rep, "all", "duration-desc", 0, 2, nil, nil)
 	if len(rep.Files) != 2 {
 		t.Fatalf("expected 2 file entries, got %d", len(rep.Files))
 	}
@@ -491,7 +617,7 @@ func TestApplyReportFilePolicySortFailedFirst(t *testing.T) {
 			{Path: "bad2.cfb", Success: false, Partial: false, Warnings: 0, DurationMS: 8},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "failed-first", 0, -1)
+	applyReportFilePolicy(rep, "all", "failed-first", 0, -1, nil, nil)
 	if len(rep.Files) != 4 {
 		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
 	}
@@ -512,7 +638,7 @@ func TestApplyReportFilePolicySortSizeDesc(t *testing.T) {
 			{Path: "b.cfb", Size: 20, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "size-desc", 0, -1)
+	applyReportFilePolicy(rep, "all", "size-desc", 0, -1, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -533,7 +659,7 @@ func TestApplyReportFilePolicySortArtifactsDesc(t *testing.T) {
 			{Path: "b.cfb", ArtifactsTotal: 2, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "artifacts-desc", 0, -1)
+	applyReportFilePolicy(rep, "all", "artifacts-desc", 0, -1, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -554,7 +680,7 @@ func TestApplyReportFilePolicySortArtifactsFailedDesc(t *testing.T) {
 			{Path: "b.cfb", ArtifactsFail: 2, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "artifacts-failed-desc", 0, -1)
+	applyReportFilePolicy(rep, "all", "artifacts-failed-desc", 0, -1, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -575,7 +701,7 @@ func TestApplyReportFilePolicySortWarningsDesc(t *testing.T) {
 			{Path: "b.cfb", Warnings: 2, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "warnings-desc", 0, -1)
+	applyReportFilePolicy(rep, "all", "warnings-desc", 0, -1, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -597,7 +723,7 @@ func TestApplyReportFilePolicySortErrorCode(t *testing.T) {
 			{Path: "a1.cfb", ErrorCode: "AAA", Success: false},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "error-code", 0, -1)
+	applyReportFilePolicy(rep, "all", "error-code", 0, -1, nil, nil)
 	if len(rep.Files) != 4 {
 		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
 	}
