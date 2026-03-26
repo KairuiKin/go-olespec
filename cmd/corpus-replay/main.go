@@ -182,7 +182,7 @@ func run(args []string, out io.Writer) error {
 		includeGlobCSV          = fset.String("include-glob", "", "comma-separated glob patterns on relative paths to include (POSIX slash style)")
 		excludeGlobCSV          = fset.String("exclude-glob", "", "comma-separated glob patterns on relative paths to exclude (POSIX slash style)")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
-		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|none")
+		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|none")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
 		runID                   = fset.String("run-id", "", "optional run identifier (for trend output, e.g. git SHA)")
@@ -1008,10 +1008,12 @@ func parseReportFilesPolicy(v string) (string, error) {
 		return "all", nil
 	case "failed":
 		return "failed", nil
+	case "issues":
+		return "issues", nil
 	case "none":
 		return "none", nil
 	default:
-		return "", fmt.Errorf("invalid report-files %q, expected all|failed|none", v)
+		return "", fmt.Errorf("invalid report-files %q, expected all|failed|issues|none", v)
 	}
 }
 
@@ -1070,6 +1072,14 @@ func applyReportFilePolicy(report *replayReport, policy string) {
 		filtered := make([]replayFileResult, 0, len(report.Files))
 		for _, f := range report.Files {
 			if !f.Success {
+				filtered = append(filtered, f)
+			}
+		}
+		report.Files = filtered
+	case "issues":
+		filtered := make([]replayFileResult, 0, len(report.Files))
+		for _, f := range report.Files {
+			if !f.Success || f.Partial || f.Warnings > 0 {
 				filtered = append(filtered, f)
 			}
 		}
