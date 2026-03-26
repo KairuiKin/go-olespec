@@ -197,7 +197,7 @@ func run(args []string, out io.Writer) error {
 		minFileSize             = fset.Int64("min-file-size-bytes", -1, "minimum file size in bytes for corpus matching, negative disables")
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
-		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
+		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|partial|issues|warnings|none")
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|failed-first")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
@@ -1137,6 +1137,8 @@ func parseReportFilesPolicy(v string) (string, error) {
 		return "all", nil
 	case "failed":
 		return "failed", nil
+	case "partial":
+		return "partial", nil
 	case "issues":
 		return "issues", nil
 	case "warnings":
@@ -1144,7 +1146,7 @@ func parseReportFilesPolicy(v string) (string, error) {
 	case "none":
 		return "none", nil
 	default:
-		return "", fmt.Errorf("invalid report-files %q, expected all|failed|issues|warnings|none", v)
+		return "", fmt.Errorf("invalid report-files %q, expected all|failed|partial|issues|warnings|none", v)
 	}
 }
 
@@ -1220,6 +1222,14 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 		filtered := make([]replayFileResult, 0, len(report.Files))
 		for _, f := range report.Files {
 			if !f.Success {
+				filtered = append(filtered, f)
+			}
+		}
+		report.Files = filtered
+	case "partial":
+		filtered := make([]replayFileResult, 0, len(report.Files))
+		for _, f := range report.Files {
+			if f.Partial {
 				filtered = append(filtered, f)
 			}
 		}
