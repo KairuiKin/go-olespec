@@ -514,6 +514,12 @@ func TestRunReplayReportErrorCodesInclude(t *testing.T) {
 	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
 		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
 	}
+	if rep.Summary.ErrorCodes[code] != 1 {
+		t.Fatalf("unexpected full error code summary: %+v", rep.Summary.ErrorCodes)
+	}
+	if rep.Summary.ReportedErrorCodes[code] != 1 {
+		t.Fatalf("unexpected reported error code summary: %+v", rep.Summary.ReportedErrorCodes)
+	}
 	if len(rep.Options.ReportErrorCodes) != 1 || rep.Options.ReportErrorCodes[0] != code {
 		t.Fatalf("unexpected report error code options: %+v", rep.Options.ReportErrorCodes)
 	}
@@ -586,6 +592,12 @@ func TestRunReplayReportErrorCodesExclude(t *testing.T) {
 	if rep.Summary.ReportedFiles != 1 || rep.Summary.OmittedFiles != 1 {
 		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
 	}
+	if rep.Summary.ErrorCodes[code] != 1 {
+		t.Fatalf("unexpected full error code summary: %+v", rep.Summary.ErrorCodes)
+	}
+	if rep.Summary.ReportedErrorCodes != nil {
+		t.Fatalf("expected no reported error codes after exclusion, got %+v", rep.Summary.ReportedErrorCodes)
+	}
 	if len(rep.Options.ReportExcludeErrorCodes) != 1 || rep.Options.ReportExcludeErrorCodes[0] != code {
 		t.Fatalf("unexpected report exclude error code options: %+v", rep.Options.ReportExcludeErrorCodes)
 	}
@@ -617,6 +629,12 @@ func TestRunReplayReportErrorCodesExcludeWins(t *testing.T) {
 	}
 	if rep.Summary.ReportedFiles != 0 || rep.Summary.OmittedFiles != 1 {
 		t.Fatalf("unexpected reported/omitted: %+v", rep.Summary)
+	}
+	if rep.Summary.ErrorCodes[code] != 1 {
+		t.Fatalf("unexpected full error code summary: %+v", rep.Summary.ErrorCodes)
+	}
+	if rep.Summary.ReportedErrorCodes != nil {
+		t.Fatalf("expected no reported error codes, got %+v", rep.Summary.ReportedErrorCodes)
 	}
 }
 

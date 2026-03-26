@@ -142,6 +142,7 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-file-size-bytes 512 -m
 ```
 
 > replay summary includes `filtered_by_ext` / `filtered_by_path` / `filtered_by_size` counters.
+> replay summary keeps full `error_codes` and report-view `reported_error_codes` after report filters.
 
 ```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-matched-files 5000

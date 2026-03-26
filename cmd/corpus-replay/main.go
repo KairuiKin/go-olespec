@@ -67,24 +67,25 @@ type replayFileResult struct {
 }
 
 type replaySummary struct {
-	ScannedFiles      int            `json:"scanned_files"`
-	MatchedFiles      int            `json:"matched_files"`
-	MatchedFilesTotal int            `json:"matched_files_total,omitempty"`
-	TruncatedMatches  int            `json:"truncated_matches,omitempty"`
-	FilteredByExt     int            `json:"filtered_by_ext,omitempty"`
-	FilteredByPath    int            `json:"filtered_by_path,omitempty"`
-	FilteredBySize    int            `json:"filtered_by_size,omitempty"`
-	Processed         int            `json:"processed"`
-	Success           int            `json:"success"`
-	Failed            int            `json:"failed"`
-	Partial           int            `json:"partial"`
-	WarningFiles      int            `json:"warning_files"`
-	WarningsTotal     int            `json:"warnings_total"`
-	ReportedFiles     int            `json:"reported_files"`
-	OmittedFiles      int            `json:"omitted_files"`
-	PassRate          float64        `json:"pass_rate"`
-	DurationMS        int64          `json:"duration_ms"`
-	ErrorCodes        map[string]int `json:"error_codes,omitempty"`
+	ScannedFiles       int            `json:"scanned_files"`
+	MatchedFiles       int            `json:"matched_files"`
+	MatchedFilesTotal  int            `json:"matched_files_total,omitempty"`
+	TruncatedMatches   int            `json:"truncated_matches,omitempty"`
+	FilteredByExt      int            `json:"filtered_by_ext,omitempty"`
+	FilteredByPath     int            `json:"filtered_by_path,omitempty"`
+	FilteredBySize     int            `json:"filtered_by_size,omitempty"`
+	Processed          int            `json:"processed"`
+	Success            int            `json:"success"`
+	Failed             int            `json:"failed"`
+	Partial            int            `json:"partial"`
+	WarningFiles       int            `json:"warning_files"`
+	WarningsTotal      int            `json:"warnings_total"`
+	ReportedFiles      int            `json:"reported_files"`
+	OmittedFiles       int            `json:"omitted_files"`
+	PassRate           float64        `json:"pass_rate"`
+	DurationMS         int64          `json:"duration_ms"`
+	ErrorCodes         map[string]int `json:"error_codes,omitempty"`
+	ReportedErrorCodes map[string]int `json:"reported_error_codes,omitempty"`
 }
 
 type replayReport struct {
@@ -745,6 +746,7 @@ func run(args []string, out io.Writer) error {
 		maxErrorCodeRegressionsPtr,
 	)
 	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit, reportIncludeCodes, reportExcludeCodes)
+	report.Summary.ReportedErrorCodes = collectErrorCodeCounts(report.Files)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
