@@ -26,6 +26,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-processed 100 -max-pro
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-scanned-files 1000 -max-scanned-files 2000
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -min-matched-files 1000 -max-matched-files 2000 -max-truncated-matches 0
 ```
 

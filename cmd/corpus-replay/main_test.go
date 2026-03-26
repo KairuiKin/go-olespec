@@ -734,6 +734,12 @@ func TestRunReplayMaxMatchedFilesValidation(t *testing.T) {
 	if err := run([]string{"-max-matched-files", "-2"}, &out); err == nil {
 		t.Fatal("expected max-matched-files validation error")
 	}
+	if err := run([]string{"-min-scanned-files", "-2"}, &out); err == nil {
+		t.Fatal("expected min-scanned-files validation error")
+	}
+	if err := run([]string{"-max-scanned-files", "-2"}, &out); err == nil {
+		t.Fatal("expected max-scanned-files validation error")
+	}
 	if err := run([]string{"-min-matched-files", "-2"}, &out); err == nil {
 		t.Fatal("expected min-matched-files validation error")
 	}
@@ -758,6 +764,53 @@ func TestRunReplayMinMatchedFilesGate(t *testing.T) {
 	}
 	if rep.Summary.MatchedFiles != 0 || rep.Summary.TruncatedMatches != 0 {
 		t.Fatalf("unexpected match summary: %+v", rep.Summary)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayMinScannedFilesGate(t *testing.T) {
+	root := t.TempDir()
+	var out bytes.Buffer
+	err := run([]string{"-root", root, "-ext", ".cfb", "-min-scanned-files", "1"}, &out)
+	if err == nil {
+		t.Fatal("expected min-scanned-files gate error")
+	}
+	if !strings.Contains(err.Error(), "min_scanned_files") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.ScannedFiles != 0 {
+		t.Fatalf("unexpected scanned files: %d", rep.Summary.ScannedFiles)
+	}
+	if rep.Gate.Passed {
+		t.Fatal("expected gate fail")
+	}
+}
+
+func TestRunReplayMaxScannedFilesGate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile a returned error: %v", err)
+	}
+	var out bytes.Buffer
+	err := run([]string{"-root", root, "-ext", ".cfb", "-max-scanned-files", "0"}, &out)
+	if err == nil {
+		t.Fatal("expected max-scanned-files gate error")
+	}
+	if !strings.Contains(err.Error(), "max_scanned_files") {
+		t.Fatalf("unexpected gate error: %v", err)
+	}
+	var rep replayReport
+	if jsonErr := json.Unmarshal(out.Bytes(), &rep); jsonErr != nil {
+		t.Fatalf("Unmarshal returned error: %v", jsonErr)
+	}
+	if rep.Summary.ScannedFiles != 1 {
+		t.Fatalf("unexpected scanned files: %d", rep.Summary.ScannedFiles)
 	}
 	if rep.Gate.Passed {
 		t.Fatal("expected gate fail")

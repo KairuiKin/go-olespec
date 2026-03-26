@@ -155,6 +155,8 @@ type replayTrendDelta struct {
 type replayGateResult struct {
 	Enabled                 bool     `json:"enabled"`
 	Passed                  bool     `json:"passed"`
+	MinScannedFiles         *int     `json:"min_scanned_files,omitempty"`
+	MaxScannedFiles         *int     `json:"max_scanned_files,omitempty"`
 	MinMatchedFiles         *int     `json:"min_matched_files,omitempty"`
 	MaxTruncatedMatches     *int     `json:"max_truncated_matches,omitempty"`
 	MinProcessed            *int     `json:"min_processed,omitempty"`
@@ -223,6 +225,8 @@ func run(args []string, out io.Writer) error {
 		maxArtifacts            = fset.Int("max-artifacts", 4096, "max artifacts per file")
 		maxTotalBytes           = fset.Int64("max-total-bytes", 64<<20, "max total extracted bytes per file")
 		maxArtifactSize         = fset.Int64("max-artifact-size", 32<<20, "max single artifact size in bytes")
+		minScannedFiles         = fset.Int("min-scanned-files", -1, "gate: minimum required scanned files, negative disables")
+		maxScannedFiles         = fset.Int("max-scanned-files", -1, "gate: maximum allowed scanned files, negative disables")
 		minMatchedFiles         = fset.Int("min-matched-files", -1, "gate: minimum required matched files before replay cap, negative disables")
 		maxTruncatedMatches     = fset.Int("max-truncated-matches", -1, "gate: maximum allowed truncated matches due to replay cap, negative disables")
 		minProcessed            = fset.Int("min-processed", -1, "gate: minimum required processed files, negative disables")
@@ -320,6 +324,12 @@ func run(args []string, out io.Writer) error {
 	}
 	if *maxMatchedFiles < -1 {
 		return errors.New("max-matched-files must be >= -1")
+	}
+	if *minScannedFiles < -1 {
+		return errors.New("min-scanned-files must be >= -1")
+	}
+	if *maxScannedFiles < -1 {
+		return errors.New("max-scanned-files must be >= -1")
 	}
 	if *minMatchedFiles < -1 {
 		return errors.New("min-matched-files must be >= -1")
@@ -563,6 +573,16 @@ func run(args []string, out io.Writer) error {
 		v := *minPassRate
 		minPassRatePtr = &v
 	}
+	var minScannedFilesPtr *int
+	if *minScannedFiles >= 0 {
+		v := *minScannedFiles
+		minScannedFilesPtr = &v
+	}
+	var maxScannedFilesPtr *int
+	if *maxScannedFiles >= 0 {
+		v := *maxScannedFiles
+		maxScannedFilesPtr = &v
+	}
 	var minMatchedFilesPtr *int
 	if *minMatchedFiles >= 0 {
 		v := *minMatchedFiles
@@ -660,6 +680,8 @@ func run(args []string, out io.Writer) error {
 	}
 	gateErr := evaluateGates(
 		&report,
+		minScannedFilesPtr,
+		maxScannedFilesPtr,
 		minMatchedFilesPtr,
 		maxTruncatedMatchesPtr,
 		minProcessedPtr,
@@ -935,6 +957,8 @@ func fileState(v replayFileResult) string {
 
 func evaluateGates(
 	report *replayReport,
+	minScannedFiles *int,
+	maxScannedFiles *int,
 	minMatchedFiles *int,
 	maxTruncatedMatches *int,
 	minProcessed *int,
@@ -962,8 +986,10 @@ func evaluateGates(
 	}
 	denyErrorCodes = normalizeCodes(denyErrorCodes)
 	report.Gate = replayGateResult{
-		Enabled:                 minMatchedFiles != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
+		Enabled:                 minScannedFiles != nil || maxScannedFiles != nil || minMatchedFiles != nil || maxTruncatedMatches != nil || minProcessed != nil || maxProcessed != nil || minPassRate != nil || maxFailed != nil || maxPartial != nil || maxWarnings != nil || maxNewlyFailed != nil || maxNewFiles != nil || maxRemovedFiles != nil || maxNewlyPartial != nil || maxPassRateDrop != nil || maxProcessedIncrease != nil || maxProcessedDrop != nil || maxFailedIncrease != nil || maxPartialIncrease != nil || maxWarningIncrease != nil || len(denyErrorCodes) > 0 || maxNewErrorCodes != nil || maxErrorCodeRegressions != nil,
 		Passed:                  true,
+		MinScannedFiles:         minScannedFiles,
+		MaxScannedFiles:         maxScannedFiles,
 		MinMatchedFiles:         minMatchedFiles,
 		MaxTruncatedMatches:     maxTruncatedMatches,
 		MinProcessed:            minProcessed,
@@ -989,6 +1015,14 @@ func evaluateGates(
 	}
 	if !report.Gate.Enabled {
 		return nil
+	}
+	if minScannedFiles != nil && report.Summary.ScannedFiles < *minScannedFiles {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("scanned_files %d < min_scanned_files %d", report.Summary.ScannedFiles, *minScannedFiles))
+	}
+	if maxScannedFiles != nil && report.Summary.ScannedFiles > *maxScannedFiles {
+		report.Gate.Failures = append(report.Gate.Failures,
+			fmt.Sprintf("scanned_files %d > max_scanned_files %d", report.Summary.ScannedFiles, *maxScannedFiles))
 	}
 	matchedTotal := report.Summary.MatchedFiles + report.Summary.TruncatedMatches
 	if minMatchedFiles != nil && matchedTotal < *minMatchedFiles {
