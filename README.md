@@ -54,6 +54,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -include-glob "team-a/*.cfb,team-b/*.cfb" -exclude-glob "team-a/archive/*.cfb"
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-partial 0 -trend-dir ./reports/history -max-partial-increase 0
 ```
 

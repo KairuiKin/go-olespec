@@ -145,6 +145,7 @@ items:
       - "integration/corpus_replay_trend_save"
       - "integration/corpus_replay_trend_prune"
       - "integration/corpus_replay_report_files_policy"
+      - "integration/corpus_replay_path_filters"
       - "fuzz/olextract_write_artifacts"
 
   - id: PERF-001

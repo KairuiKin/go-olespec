@@ -132,6 +132,126 @@ func TestRunReplayReportFilesInvalid(t *testing.T) {
 	}
 }
 
+func TestRunReplayIncludeGlob(t *testing.T) {
+	root := t.TempDir()
+	keepDir := filepath.Join(root, "keep")
+	skipDir := filepath.Join(root, "skip")
+	if err := os.MkdirAll(keepDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll keep returned error: %v", err)
+	}
+	if err := os.MkdirAll(skipDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll skip returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(keepDir, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile keep returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skipDir, "b.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile skip returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-include-glob", "keep/*.cfb"}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 1 {
+		t.Fatalf("expected 1 processed file, got %d", rep.Summary.Processed)
+	}
+	if rep.Summary.Success != 1 || rep.Summary.Failed != 0 {
+		t.Fatalf("unexpected summary: %+v", rep.Summary)
+	}
+	if len(rep.Options.IncludeGlobs) != 1 || rep.Options.IncludeGlobs[0] != "keep/*.cfb" {
+		t.Fatalf("unexpected include globs: %+v", rep.Options.IncludeGlobs)
+	}
+}
+
+func TestRunReplayExcludeGlob(t *testing.T) {
+	root := t.TempDir()
+	keepDir := filepath.Join(root, "keep")
+	skipDir := filepath.Join(root, "skip")
+	if err := os.MkdirAll(keepDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll keep returned error: %v", err)
+	}
+	if err := os.MkdirAll(skipDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll skip returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(keepDir, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile keep returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skipDir, "b.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile skip returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := run([]string{"-root", root, "-ext", ".cfb", "-exclude-glob", "skip/*.cfb"}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 1 {
+		t.Fatalf("expected 1 processed file, got %d", rep.Summary.Processed)
+	}
+	if rep.Summary.Success != 1 || rep.Summary.Failed != 0 {
+		t.Fatalf("unexpected summary: %+v", rep.Summary)
+	}
+	if len(rep.Options.ExcludeGlobs) != 1 || rep.Options.ExcludeGlobs[0] != "skip/*.cfb" {
+		t.Fatalf("unexpected exclude globs: %+v", rep.Options.ExcludeGlobs)
+	}
+}
+
+func TestRunReplayIncludeExcludeGlobPrecedence(t *testing.T) {
+	root := t.TempDir()
+	keepDir := filepath.Join(root, "keep")
+	otherDir := filepath.Join(root, "other")
+	if err := os.MkdirAll(keepDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll keep returned error: %v", err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll other returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(keepDir, "a.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile keep returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "b.cfb"), buildSampleCFB(t), 0o644); err != nil {
+		t.Fatalf("WriteFile other returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-include-glob", "*/*.cfb",
+		"-exclude-glob", "keep/*.cfb",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Summary.Processed != 1 {
+		t.Fatalf("expected 1 processed file, got %d", rep.Summary.Processed)
+	}
+	if len(rep.Files) != 1 || rep.Files[0].Path != "other/b.cfb" {
+		t.Fatalf("unexpected files: %+v", rep.Files)
+	}
+}
+
+func TestRunReplayGlobPatternValidation(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"-include-glob", "[bad"}, &out); err == nil {
+		t.Fatal("expected include-glob validation error")
+	}
+	if err := run([]string{"-exclude-glob", "[bad"}, &out); err == nil {
+		t.Fatal("expected exclude-glob validation error")
+	}
+}
+
 func TestRunReplayBaselineDiffAndNewlyFailedGate(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.cfb")

@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,6 +21,8 @@ import (
 type replayOptions struct {
 	Root            string   `json:"root"`
 	Extensions      []string `json:"extensions"`
+	IncludeGlobs    []string `json:"include_globs,omitempty"`
+	ExcludeGlobs    []string `json:"exclude_globs,omitempty"`
 	Mode            string   `json:"mode"`
 	ReportFiles     string   `json:"report_files"`
 	RunID           string   `json:"run_id,omitempty"`
@@ -176,6 +179,8 @@ func run(args []string, out io.Writer) error {
 	var (
 		root                    = fset.String("root", ".", "root directory for corpus files")
 		extCSV                  = fset.String("ext", ".doc,.dot,.xls,.xlt,.ppt,.pot,.ole,.cfb", "comma-separated file extensions; empty means all files")
+		includeGlobCSV          = fset.String("include-glob", "", "comma-separated glob patterns on relative paths to include (POSIX slash style)")
+		excludeGlobCSV          = fset.String("exclude-glob", "", "comma-separated glob patterns on relative paths to exclude (POSIX slash style)")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|none")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
@@ -274,6 +279,14 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	includeGlobs, err := parsePathGlobs(*includeGlobCSV, "include-glob")
+	if err != nil {
+		return err
+	}
+	excludeGlobs, err := parsePathGlobs(*excludeGlobCSV, "exclude-glob")
+	if err != nil {
+		return err
+	}
 
 	mode, err := parseMode(*modeStr)
 	if err != nil {
@@ -299,7 +312,11 @@ func run(args []string, out io.Writer) error {
 			return nil
 		}
 		scanned++
-		if matchesExt(path, extensions) {
+		rel := path
+		if r, relErr := filepath.Rel(absRoot, path); relErr == nil {
+			rel = filepath.ToSlash(r)
+		}
+		if matchesExt(path, extensions) && matchesPathFilters(rel, includeGlobs, excludeGlobs) {
 			matched = append(matched, path)
 		}
 		return nil
@@ -312,6 +329,8 @@ func run(args []string, out io.Writer) error {
 	opt := replayOptions{
 		Root:            absRoot,
 		Extensions:      append([]string(nil), extensions...),
+		IncludeGlobs:    append([]string(nil), includeGlobs...),
+		ExcludeGlobs:    append([]string(nil), excludeGlobs...),
 		Mode:            strings.ToLower(*modeStr),
 		ReportFiles:     reportFilesPolicy,
 		RunID:           strings.TrimSpace(*runID),
@@ -994,6 +1013,49 @@ func parseReportFilesPolicy(v string) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid report-files %q, expected all|failed|none", v)
 	}
+}
+
+func parsePathGlobs(csv, flagName string) ([]string, error) {
+	patterns := parseCSVTokens(csv)
+	if len(patterns) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		p = filepath.ToSlash(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		if _, err := path.Match(p, "probe/path"); err != nil {
+			return nil, fmt.Errorf("invalid %s pattern %q: %w", flagName, p, err)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func matchesPathFilters(rel string, include, exclude []string) bool {
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	if len(include) > 0 {
+		matched := false
+		for _, p := range include {
+			ok, _ := path.Match(p, rel)
+			if ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	for _, p := range exclude {
+		ok, _ := path.Match(p, rel)
+		if ok {
+			return false
+		}
+	}
+	return true
 }
 
 func applyReportFilePolicy(report *replayReport, policy string) {
