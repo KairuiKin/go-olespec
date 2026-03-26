@@ -31,6 +31,8 @@ type replayOptions struct {
 	ReportSort              string   `json:"report_sort,omitempty"`
 	ReportOffset            int      `json:"report_offset,omitempty"`
 	ReportLimit             int      `json:"report_limit,omitempty"`
+	ReportIncludeGlobs      []string `json:"report_include_globs,omitempty"`
+	ReportExcludeGlobs      []string `json:"report_exclude_globs,omitempty"`
 	ReportErrorCodes        []string `json:"report_error_codes,omitempty"`
 	ReportExcludeErrorCodes []string `json:"report_exclude_error_codes,omitempty"`
 	RunID                   string   `json:"run_id,omitempty"`
@@ -215,6 +217,8 @@ func run(args []string, out io.Writer) error {
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|artifacts-failed-desc|warnings-desc|error-code|failed-first")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
+		reportIncludeGlobCSV    = fset.String("report-include-glob", "", "comma-separated glob patterns on report relative paths to include after report-files policy (POSIX slash style)")
+		reportExcludeGlobCSV    = fset.String("report-exclude-glob", "", "comma-separated glob patterns on report relative paths to exclude after report-files policy (POSIX slash style)")
 		reportErrorCodes        = fset.String("report-error-codes", "", "comma-separated error code patterns to include in report file entries after report-files policy (* and ? supported)")
 		reportExcludeErrorCodes = fset.String("report-exclude-error-codes", "", "comma-separated error code patterns to exclude from report file entries after report-files policy (* and ? supported)")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
@@ -376,6 +380,14 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	reportIncludeGlobs, err := parsePathGlobs(*reportIncludeGlobCSV, "report-include-glob")
+	if err != nil {
+		return err
+	}
+	reportExcludeGlobs, err := parsePathGlobs(*reportExcludeGlobCSV, "report-exclude-glob")
+	if err != nil {
+		return err
+	}
 
 	mode, err := parseMode(*modeStr)
 	if err != nil {
@@ -455,6 +467,8 @@ func run(args []string, out io.Writer) error {
 		ReportSort:              reportSortPolicy,
 		ReportOffset:            *reportOffset,
 		ReportLimit:             *reportLimit,
+		ReportIncludeGlobs:      append([]string(nil), reportIncludeGlobs...),
+		ReportExcludeGlobs:      append([]string(nil), reportExcludeGlobs...),
 		ReportErrorCodes:        append([]string(nil), reportIncludeCodes...),
 		ReportExcludeErrorCodes: append([]string(nil), reportExcludeCodes...),
 		RunID:                   strings.TrimSpace(*runID),
@@ -745,7 +759,7 @@ func run(args []string, out io.Writer) error {
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
 	)
-	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit, reportIncludeCodes, reportExcludeCodes)
+	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit, reportIncludeCodes, reportExcludeCodes, reportIncludeGlobs, reportExcludeGlobs)
 	report.Summary.ReportedErrorCodes = collectErrorCodeCounts(report.Files)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
@@ -1375,7 +1389,7 @@ func matchesPathFilters(rel string, include, exclude []string) bool {
 	return true
 }
 
-func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, limit int, includeCodes, excludeCodes []string) {
+func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, limit int, includeCodes, excludeCodes, includeGlobs, excludeGlobs []string) {
 	if report == nil {
 		return
 	}
@@ -1435,6 +1449,16 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 		report.Files = nil
 	default:
 		// unreachable if parsed through parseReportFilesPolicy
+	}
+	if len(includeGlobs) > 0 || len(excludeGlobs) > 0 {
+		filtered := make([]replayFileResult, 0, len(report.Files))
+		for _, f := range report.Files {
+			if !matchesPathFilters(f.Path, includeGlobs, excludeGlobs) {
+				continue
+			}
+			filtered = append(filtered, f)
+		}
+		report.Files = filtered
 	}
 	if len(includeCodes) > 0 || len(excludeCodes) > 0 {
 		filtered := make([]replayFileResult, 0, len(report.Files))

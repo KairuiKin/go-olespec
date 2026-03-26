@@ -134,6 +134,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-sort failed-first -
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-include-glob "team-a/*.cfb" -report-exclude-glob "team-a/archive/*.cfb"
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -include-glob "team-a/*.cfb,team-b/*.cfb" -exclude-glob "team-a/archive/*.cfb"
 ```
 

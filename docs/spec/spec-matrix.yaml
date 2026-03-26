@@ -161,6 +161,7 @@ items:
       - "integration/corpus_replay_report_sort_error_code"
       - "integration/corpus_replay_report_limit"
       - "integration/corpus_replay_report_pagination"
+      - "integration/corpus_replay_report_path_filters"
       - "integration/corpus_replay_report_error_code_filters"
       - "integration/corpus_replay_max_matched_files"
       - "integration/corpus_replay_matched_truncation_gates"
