@@ -150,6 +150,7 @@ items:
       - "integration/corpus_replay_report_files_issues"
       - "integration/corpus_replay_report_files_warnings"
       - "integration/corpus_replay_report_files_partial"
+      - "integration/corpus_replay_report_files_clean"
       - "integration/corpus_replay_report_sort"
       - "integration/corpus_replay_report_sort_size_desc"
       - "integration/corpus_replay_report_sort_artifacts_desc"

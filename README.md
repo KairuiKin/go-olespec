@@ -74,6 +74,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -max-artifact-size 1 -repor
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files clean
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files issues -report-limit 200
 ```
 
