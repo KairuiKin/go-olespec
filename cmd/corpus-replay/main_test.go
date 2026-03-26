@@ -292,6 +292,28 @@ func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 	}
 }
 
+func TestApplyReportFilePolicySortFailedFirst(t *testing.T) {
+	rep := &replayReport{
+		Files: []replayFileResult{
+			{Path: "ok.cfb", Success: true, Partial: false, Warnings: 0, DurationMS: 5},
+			{Path: "partial.cfb", Success: true, Partial: true, Warnings: 1, DurationMS: 4},
+			{Path: "bad1.cfb", Success: false, Partial: false, Warnings: 0, DurationMS: 2},
+			{Path: "bad2.cfb", Success: false, Partial: false, Warnings: 0, DurationMS: 8},
+		},
+	}
+	applyReportFilePolicy(rep, "all", "failed-first", -1)
+	if len(rep.Files) != 4 {
+		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
+	}
+	got := []string{rep.Files[0].Path, rep.Files[1].Path, rep.Files[2].Path, rep.Files[3].Path}
+	want := []string{"bad2.cfb", "bad1.cfb", "partial.cfb", "ok.cfb"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected failed-first order: got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestRunReplayReportFilesInvalid(t *testing.T) {
 	var out bytes.Buffer
 	if err := run([]string{"-report-files", "bad"}, &out); err == nil {

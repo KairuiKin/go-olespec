@@ -197,7 +197,7 @@ func run(args []string, out io.Writer) error {
 		maxFileSize             = fset.Int64("max-file-size-bytes", -1, "maximum file size in bytes for corpus matching, negative disables")
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|issues|warnings|none")
-		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc")
+		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|failed-first")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
 		baselinePath            = fset.String("baseline", "", "path to baseline replay report JSON for regression diff")
 		baselineLatest          = fset.Bool("baseline-latest", false, "use latest replay report under trend-dir as baseline")
@@ -1148,8 +1148,10 @@ func parseReportSortPolicy(v string) (string, error) {
 		return "path", nil
 	case "duration-desc":
 		return "duration-desc", nil
+	case "failed-first":
+		return "failed-first", nil
 	default:
-		return "", fmt.Errorf("invalid report-sort %q, expected path|duration-desc", v)
+		return "", fmt.Errorf("invalid report-sort %q, expected path|duration-desc|failed-first", v)
 	}
 }
 
@@ -1247,6 +1249,24 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, limit in
 				return report.Files[i].Path < report.Files[j].Path
 			}
 			return report.Files[i].DurationMS > report.Files[j].DurationMS
+		})
+	case "failed-first":
+		sort.SliceStable(report.Files, func(i, j int) bool {
+			a := report.Files[i]
+			b := report.Files[j]
+			if a.Success != b.Success {
+				return !a.Success
+			}
+			if a.Partial != b.Partial {
+				return a.Partial
+			}
+			if a.Warnings != b.Warnings {
+				return a.Warnings > b.Warnings
+			}
+			if a.DurationMS != b.DurationMS {
+				return a.DurationMS > b.DurationMS
+			}
+			return a.Path < b.Path
 		})
 	default:
 		// unreachable if parsed through parseReportSortPolicy
