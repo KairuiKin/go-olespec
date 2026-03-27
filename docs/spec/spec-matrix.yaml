@@ -159,6 +159,7 @@ items:
       - "integration/corpus_replay_report_sort_artifacts_failed_desc"
       - "integration/corpus_replay_report_sort_warnings_desc"
       - "integration/corpus_replay_report_sort_error_code"
+      - "integration/corpus_replay_report_sort_error_code_tie_breaker"
       - "integration/corpus_replay_report_limit"
       - "integration/corpus_replay_report_pagination"
       - "integration/corpus_replay_report_path_filters"

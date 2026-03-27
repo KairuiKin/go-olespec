@@ -751,6 +751,30 @@ func TestRunReplayReportErrorCodesExcludeWins(t *testing.T) {
 	}
 }
 
+func TestRunReplayReportSortTieBreakerOption(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.cfb"), []byte("bad"), 0o644); err != nil {
+		t.Fatalf("WriteFile bad returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := run([]string{
+		"-root", root,
+		"-ext", ".cfb",
+		"-report-sort", "error-code",
+		"-report-sort-tie-breaker", "duration-desc",
+	}, &out); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var rep replayReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if rep.Options.ReportSortTieBreaker != "duration-desc" {
+		t.Fatalf("unexpected report sort tie-breaker option: %s", rep.Options.ReportSortTieBreaker)
+	}
+}
+
 func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 	rep := &replayReport{
 		Files: []replayFileResult{
@@ -759,7 +783,7 @@ func TestApplyReportFilePolicySortDurationDesc(t *testing.T) {
 			{Path: "b.cfb", DurationMS: 20, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "duration-desc", 0, 2, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "duration-desc", "path", 0, 2, nil, nil, nil, nil)
 	if len(rep.Files) != 2 {
 		t.Fatalf("expected 2 file entries, got %d", len(rep.Files))
 	}
@@ -780,7 +804,7 @@ func TestApplyReportFilePolicySortFailedFirst(t *testing.T) {
 			{Path: "bad2.cfb", Success: false, Partial: false, Warnings: 0, DurationMS: 8},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "failed-first", 0, -1, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "failed-first", "path", 0, -1, nil, nil, nil, nil)
 	if len(rep.Files) != 4 {
 		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
 	}
@@ -801,7 +825,7 @@ func TestApplyReportFilePolicySortSizeDesc(t *testing.T) {
 			{Path: "b.cfb", Size: 20, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "size-desc", 0, -1, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "size-desc", "path", 0, -1, nil, nil, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -822,7 +846,7 @@ func TestApplyReportFilePolicySortArtifactsDesc(t *testing.T) {
 			{Path: "b.cfb", ArtifactsTotal: 2, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "artifacts-desc", 0, -1, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "artifacts-desc", "path", 0, -1, nil, nil, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -843,7 +867,7 @@ func TestApplyReportFilePolicySortArtifactsFailedDesc(t *testing.T) {
 			{Path: "b.cfb", ArtifactsFail: 2, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "artifacts-failed-desc", 0, -1, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "artifacts-failed-desc", "path", 0, -1, nil, nil, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -864,7 +888,7 @@ func TestApplyReportFilePolicySortWarningsDesc(t *testing.T) {
 			{Path: "b.cfb", Warnings: 2, Success: true},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "warnings-desc", 0, -1, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "warnings-desc", "path", 0, -1, nil, nil, nil, nil)
 	if len(rep.Files) != 3 {
 		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
 	}
@@ -886,7 +910,7 @@ func TestApplyReportFilePolicySortErrorCode(t *testing.T) {
 			{Path: "a1.cfb", ErrorCode: "AAA", Success: false},
 		},
 	}
-	applyReportFilePolicy(rep, "all", "error-code", 0, -1, nil, nil, nil, nil)
+	applyReportFilePolicy(rep, "all", "error-code", "path", 0, -1, nil, nil, nil, nil)
 	if len(rep.Files) != 4 {
 		t.Fatalf("expected 4 file entries, got %d", len(rep.Files))
 	}
@@ -899,6 +923,27 @@ func TestApplyReportFilePolicySortErrorCode(t *testing.T) {
 	}
 }
 
+func TestApplyReportFilePolicySortErrorCodeDurationTieBreaker(t *testing.T) {
+	rep := &replayReport{
+		Files: []replayFileResult{
+			{Path: "b.cfb", ErrorCode: "AAA", DurationMS: 10, Success: false},
+			{Path: "a.cfb", ErrorCode: "AAA", DurationMS: 20, Success: false},
+			{Path: "c.cfb", ErrorCode: "BBB", DurationMS: 5, Success: false},
+		},
+	}
+	applyReportFilePolicy(rep, "all", "error-code", "duration-desc", 0, -1, nil, nil, nil, nil)
+	if len(rep.Files) != 3 {
+		t.Fatalf("expected 3 file entries, got %d", len(rep.Files))
+	}
+	got := []string{rep.Files[0].Path, rep.Files[1].Path, rep.Files[2].Path}
+	want := []string{"a.cfb", "b.cfb", "c.cfb"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected error-code duration tie-breaker order: got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestRunReplayReportFilesInvalid(t *testing.T) {
 	var out bytes.Buffer
 	if err := run([]string{"-report-files", "bad"}, &out); err == nil {
@@ -906,6 +951,9 @@ func TestRunReplayReportFilesInvalid(t *testing.T) {
 	}
 	if err := run([]string{"-report-sort", "bad"}, &out); err == nil {
 		t.Fatal("expected report-sort validation error")
+	}
+	if err := run([]string{"-report-sort-tie-breaker", "bad"}, &out); err == nil {
+		t.Fatal("expected report-sort-tie-breaker validation error")
 	}
 	if err := run([]string{"-report-offset", "-1"}, &out); err == nil {
 		t.Fatal("expected report-offset validation error")

@@ -126,6 +126,10 @@ go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -repor
 ```
 
 ```bash
+go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -report-sort error-code -report-sort-tie-breaker duration-desc -report-limit 100
+```
+
+```bash
 go run ./cmd/corpus-replay -root ./samples -ext .cfb -report-files failed -report-error-codes BAD_*,UNKNOWN -report-exclude-error-codes DIR_CORRUPT
 ```
 

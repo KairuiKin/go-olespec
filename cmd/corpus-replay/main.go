@@ -29,6 +29,7 @@ type replayOptions struct {
 	Mode                    string   `json:"mode"`
 	ReportFiles             string   `json:"report_files"`
 	ReportSort              string   `json:"report_sort,omitempty"`
+	ReportSortTieBreaker    string   `json:"report_sort_tie_breaker,omitempty"`
 	ReportOffset            int      `json:"report_offset,omitempty"`
 	ReportLimit             int      `json:"report_limit,omitempty"`
 	ReportIncludeGlobs      []string `json:"report_include_globs,omitempty"`
@@ -215,6 +216,7 @@ func run(args []string, out io.Writer) error {
 		modeStr                 = fset.String("mode", "lenient", "parse mode: strict|lenient")
 		reportFiles             = fset.String("report-files", "all", "report file entries policy: all|failed|success|partial|issues|warnings|clean|none")
 		reportSort              = fset.String("report-sort", "path", "report file entries sort: path|duration-desc|size-desc|artifacts-desc|artifacts-failed-desc|warnings-desc|error-code|failed-first")
+		reportSortTieBreaker    = fset.String("report-sort-tie-breaker", "path", "secondary sort for report-sort=error-code: path|duration-desc")
 		reportOffset            = fset.Int("report-offset", 0, "number of sorted report file entries to skip")
 		reportLimit             = fset.Int("report-limit", -1, "maximum number of file entries in output report, negative disables")
 		reportIncludeGlobCSV    = fset.String("report-include-glob", "", "comma-separated glob patterns on report relative paths to include after report-files policy (POSIX slash style)")
@@ -372,6 +374,10 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	reportSortTieBreakerPolicy, err := parseReportSortTieBreaker(*reportSortTieBreaker)
+	if err != nil {
+		return err
+	}
 	includeGlobs, err := parsePathGlobs(*includeGlobCSV, "include-glob")
 	if err != nil {
 		return err
@@ -465,6 +471,7 @@ func run(args []string, out io.Writer) error {
 		Mode:                    strings.ToLower(*modeStr),
 		ReportFiles:             reportFilesPolicy,
 		ReportSort:              reportSortPolicy,
+		ReportSortTieBreaker:    reportSortTieBreakerPolicy,
 		ReportOffset:            *reportOffset,
 		ReportLimit:             *reportLimit,
 		ReportIncludeGlobs:      append([]string(nil), reportIncludeGlobs...),
@@ -759,7 +766,7 @@ func run(args []string, out io.Writer) error {
 		maxNewErrorCodesPtr,
 		maxErrorCodeRegressionsPtr,
 	)
-	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, *reportOffset, *reportLimit, reportIncludeCodes, reportExcludeCodes, reportIncludeGlobs, reportExcludeGlobs)
+	applyReportFilePolicy(&report, reportFilesPolicy, reportSortPolicy, reportSortTieBreakerPolicy, *reportOffset, *reportLimit, reportIncludeCodes, reportExcludeCodes, reportIncludeGlobs, reportExcludeGlobs)
 	report.Summary.ReportedErrorCodes = collectErrorCodeCounts(report.Files)
 
 	buf, err := json.MarshalIndent(report, "", "  ")
@@ -1330,6 +1337,17 @@ func parseReportSortPolicy(v string) (string, error) {
 	}
 }
 
+func parseReportSortTieBreaker(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "path":
+		return "path", nil
+	case "duration-desc":
+		return "duration-desc", nil
+	default:
+		return "", fmt.Errorf("invalid report-sort-tie-breaker %q, expected path|duration-desc", v)
+	}
+}
+
 func parsePathGlobs(csv, flagName string) ([]string, error) {
 	patterns := parseCSVTokens(csv)
 	if len(patterns) == 0 {
@@ -1389,7 +1407,7 @@ func matchesPathFilters(rel string, include, exclude []string) bool {
 	return true
 }
 
-func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, limit int, includeCodes, excludeCodes, includeGlobs, excludeGlobs []string) {
+func applyReportFilePolicy(report *replayReport, policy, sortBy, sortTieBreaker string, offset, limit int, includeCodes, excludeCodes, includeGlobs, excludeGlobs []string) {
 	if report == nil {
 		return
 	}
@@ -1531,6 +1549,11 @@ func applyReportFilePolicy(report *replayReport, policy, sortBy string, offset, 
 			}
 			if aCode != bCode {
 				return aCode < bCode
+			}
+			if sortTieBreaker == "duration-desc" {
+				if report.Files[i].DurationMS != report.Files[j].DurationMS {
+					return report.Files[i].DurationMS > report.Files[j].DurationMS
+				}
 			}
 			return report.Files[i].Path < report.Files[j].Path
 		})
